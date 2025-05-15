@@ -19,8 +19,7 @@ def main():
     # Initialize the problem
     t_span = (0, 6.28)
     initial_conditions = np.array([-1.0, 0.0, 0.0, 0.8])
-    constraints = np.array([0, 0, 0]) # [Max reentry angle, max planetary protection violation, max terminal error]
-    problem = Problem(initial_conditions, mu, t_span, constraints)
+    problem = Problem(initial_conditions, mu, t_span)
 
     # Simulate the trajectory
     problem.simulate_trajectory()
