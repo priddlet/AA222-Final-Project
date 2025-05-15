@@ -56,8 +56,13 @@ class Problem:
         x, y, vx, vy = state
         a = np.zeros(2)
         for obj in self.objects:
-            a += obj.get_gravitational_acceleration(x, y, vx, vy)
+            a += obj.get_gravitational_acceleration(x, y)
         
+        # Propagate the orbits of the other objects
+        earth = self.objects[0]
+        for obj in self.objects[1:]:
+            obj.propagate_position(obj.get_gravitational_acceleration(earth.x, earth.y), t)
+
         return np.array([vx, vy, a[0], a[1]])
     
     # Simulate the trajectory of the system
@@ -159,6 +164,11 @@ class Problem:
         
         # TODO: Plot the constraints
 
+        # If any of the objects are dynamic, plot their trajectories
+        for obj in self.objects:
+            if obj.dynamic:
+                plt.plot(obj.trajectory[:,0], obj.trajectory[:, 1], color=obj.color, label=obj.name)
+
         # Plot Earth and Sun
         for obj in self.objects:    
             circle = plt.Circle(obj.position, obj.radius, color=obj.color, label=obj.name)
@@ -168,6 +178,10 @@ class Problem:
 
         # Plot the trajectory
         plt.plot(self.trajectory[:, 0], self.trajectory[:, 1])
+
+        # Plot the initial conditions
+        plt.scatter(self.initial_conditions[0], self.initial_conditions[1], color="red", label="Initial Conditions")
+
         plt.title("Simulated PR3BP Trajectory")
         plt.xlabel("x")
         plt.ylabel("y")

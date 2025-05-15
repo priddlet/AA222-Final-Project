@@ -24,9 +24,10 @@ def main():
     # Initialize the problem
     t_span = (0, 70)
     initial_conditions = np.array([1, -10, 0, 1.5])
-    planet1 = Object("Earth", np.array([0.0, 0.0]), 1, G, 3, "planet", "blue")
-    planet2 = Object("Moon", np.array([10, 0.0]), 2, G, 6, "satellite", "gray")
-    planet3 = Object("Sun", np.array([5, -5]), 3, G, 10, "planet", "yellow")
+    # Name, position, radius, G, mass, type, color, initial_velocity, dynamic
+    planet1 = Object("Earth", np.array([0.0, 0.0]), 2, G, 100, "planet", "blue",[0, 0], False)
+    planet2 = Object("Moon", np.array([10, 0.0]), 1, G, 6, "satellite", "gray", [0, -.1], False)
+    planet3 = Object("Sun", np.array([5, -5]), 1, G, 50, "planet", "yellow", [0, 0], False)
     problem = Problem(initial_conditions, [planet1, planet2, planet3], t_span)
 
     # Simulate the trajectory
