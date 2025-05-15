@@ -5,11 +5,11 @@
 import numpy as np
 from scipy.integrate import solve_ivp
 import matplotlib.pyplot as plt
-from planet import Planet
+from planet import Object
 
 class Problem:
     # Initialize the problem with the initial conditions
-    def __init__(self, initial_conditions, objects: list[Planet], t_span):
+    def __init__(self, initial_conditions, objects: list[Object], t_span):
         """
         Inputs:
             initial_conditions: initial conditions of the system
@@ -93,23 +93,23 @@ class Problem:
     
     # Placeholder: define avoidance/safe zones
     def planetary_protection_constraint(self):
-        # Enforce a minimum radius from Earth
-        dists = np.linalg.norm(self.trajectory[:, :2] - self.earth_pos, axis=1)
-        
-        # Find the minimum distance in the trajectory
-        min_dist = np.min(dists)
-
-        # Calculate the error in distance
-        dist_error = self.min_allowed_dist - min_dist
-
-        return dist_error  # Constraint is positive when outside of tolerance
+        dist_errors = []
+        # Calculate the minimum distance to each object
+        for obj in self.objects:
+            dists = np.linalg.norm(self.trajectory[:, :2] - obj.position, axis=1)
+            min_dist = np.min(dists)
+            # Enforce a minimum radius from each object
+            dist_error = obj.protected_zone - min_dist
+            dist_errors.append(dist_error)
+        return np.array(dist_errors)
     
     # Constrain angle relative to earth entry corridor
     def reentry_angle_constraint(self):
         x, y, vx, vy = self.trajectory[-1]
-        r = np.sqrt((x - self.earth_pos[0])**2 + (y - self.earth_pos[1])**2)
+        earth = self.objects[0]
+        r = np.sqrt((x - earth.position[0])**2 + (y - earth.position[1])**2)
         v = np.array([vx, vy])
-        r_vec = np.array([x - self.earth_pos[0], y - self.earth_pos[1]])
+        r_vec = np.array([x - earth.position[0], y - earth.position[1]])
         
         # Calculate the angle between the velocity vector and the position vector
         cos_theta = np.dot(v, r_vec) / (np.linalg.norm(v) * r)
@@ -118,21 +118,21 @@ class Problem:
         # Calculate the error in angle
         angle_error = (-1 * self.reentry_angle_tolerance) + abs(angle_deg - self.target_angle)
 
-        return angle_error  # Constraint is positive when outside of tolerance
+        return np.array([angle_error])  # Constraint is positive when outside of tolerance
     
     # Constrain terminal error
     def terminal_constraint(self):
         x, y, vx, vy = self.trajectory[-1]
-
+        earth = self.objects[0]
         # Calculate the distance to the earth
-        r = np.sqrt((x - self.earth_pos[0])**2 + (y - self.earth_pos[1])**2)
+        r = np.sqrt((x - earth.position[0])**2 + (y - earth.position[1])**2)
         v_mag = np.linalg.norm(np.array([vx, vy]))
 
         # Calculate the error in distance and speed
         r_error = r - self.leo_radius
         v_error = v_mag - self.max_terminal_speed
 
-        return r_error, v_error
+        return np.array([r_error, v_error])
     
     # Evaluate the constraints
     def evaluate_constraints(self):
@@ -142,9 +142,9 @@ class Problem:
         """
         reentry_angle_error = self.reentry_angle_constraint()
         planetary_protection_error = self.planetary_protection_constraint()
-        terminal_r_error, terminal_v_error = self.terminal_constraint()
+        terminal_error = self.terminal_constraint()
 
-        return np.array([reentry_angle_error, planetary_protection_error, terminal_r_error, terminal_v_error])
+        return np.concatenate([reentry_angle_error, planetary_protection_error, terminal_error], axis=0)
 
     # Plot the trajectory of the system
     def plot_trajectory(self):
@@ -160,10 +160,8 @@ class Problem:
         # TODO: Plot the constraints
 
         # Plot Earth and Sun
-        # Define colors for each planet
-        planet_colors = ["red", "blue", "yellow", "green", "purple", "orange", "brown", "pink", "gray", "cyan", "magenta", "lime", "teal", "olive", "navy", "maroon", "gold", "silver", "black", "white"]
-        for i, obj in enumerate(self.objects):    
-            circle = plt.Circle(obj.position, obj.radius, color=planet_colors[i], label=obj.name)
+        for obj in self.objects:    
+            circle = plt.Circle(obj.position, obj.radius, color=obj.color, label=obj.name)
             plt.gca().add_patch(circle)
         
         plt.legend()

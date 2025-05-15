@@ -1,7 +1,7 @@
 import numpy as np
 
-class Planet:
-    def __init__(self, name, position, radius, G, mass):
+class Object:
+    def __init__(self, name, position, radius, G, mass, type, color):
         self.name = name
         self.position = position
         self.x = position[0]
@@ -9,11 +9,9 @@ class Planet:
         self.radius = radius
         self.G = G
         self.mass = mass
+        self.color = color
+        self.protected_zone = None
 
-    def get_gravitational_force(self, other_body):
-        r = np.linalg.norm(self.position - other_body.position)
-        return self.G * self.mass * other_body.mass / r**2
-    
     def get_gravitational_acceleration(self, x, y, vx, vy):
         r = np.linalg.norm(self.position - np.array([x, y]))
         a = self.mass * (self.position - np.array([x, y])) / r**3
@@ -30,3 +28,12 @@ class Planet:
     
     def get_radius(self):
         return self.radius
+    
+    def set_protected_zone(self, type):
+        if type == "planet":
+            self.protected_zone = 1e3 # km
+        elif type == "satellite":
+            self.protected_zone = 50 #km
+        else:
+            raise ValueError("Invalid protected zone type")
+
