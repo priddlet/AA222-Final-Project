@@ -2,6 +2,7 @@
 
 import numpy as np
 from simulation import Problem
+from planet import Planet
 
 ## Constants and params
 
@@ -12,14 +13,21 @@ AU = 1.496e8           # km
 # Normalized units for PR3BP (sun-earth system)
 mu = MU_EARTH / (MU_EARTH + MU_SUN)
 
+scale_factor = 1e-3
+
 # Time normalization (1 unit = 1 earth year)
 T_UNIT = 2 * np.pi     # rad/year
 
+G = 1
+
 def main():
     # Initialize the problem
-    t_span = (0, 6.28)
-    initial_conditions = np.array([-1.0, 0.0, 0.0, 0.8])
-    problem = Problem(initial_conditions, mu, t_span)
+    t_span = (0, 70)
+    initial_conditions = np.array([1, -10, 0, 1.5])
+    planet1 = Planet("Earth", np.array([0.0, 0.0]), 1, G, 3)
+    planet2 = Planet("Moon", np.array([10, 0.0]), 2, G, 6)
+    planet3 = Planet("Sun", np.array([5, -5]), 3, G, 10)
+    problem = Problem(initial_conditions, [planet1, planet2, planet3], t_span)
 
     # Simulate the trajectory
     problem.simulate_trajectory()

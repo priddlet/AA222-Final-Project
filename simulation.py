@@ -5,30 +5,30 @@
 import numpy as np
 from scipy.integrate import solve_ivp
 import matplotlib.pyplot as plt
-
+from planet import Planet
 
 class Problem:
     # Initialize the problem with the initial conditions
-    def __init__(self, initial_conditions, mu, t_span):
+    def __init__(self, initial_conditions, objects: list[Planet], t_span):
         """
         Inputs:
             initial_conditions: initial conditions of the system
-            mu: gravitational parameter of the system
+            objects: list of objects in the system
             t_span: time span of the simulation
         """
         self.initial_conditions = initial_conditions
-        self.mu = mu
+        self.objects = objects
         self.t_span = t_span
         self.t = None
         self.trajectory = None
         self.control_sequence = None
 
         # Earth position in normalized units
-        self.earth_pos = np.array([-self.mu, 0])
-        self.leo_radius = 1 - self.mu
+        self.earth_pos = np.array([0, 0])
+        self.leo_radius = 1# 1 - self.mu
 
         # Sun position in normalized units
-        self.sun_pos = np.array([1 - self.mu, 0])
+        self.sun_pos = np.array([5, 0])
         self.sun_radius = 1
 
         # Set the constraint constants
@@ -45,23 +45,20 @@ class Problem:
         self.max_terminal_speed = np.sqrt(1 / self.leo_radius)
     
     # Contains the dynamics equations for the PR3BP
-    def pr3bp_dynamics(self, t, state, mu):
+    def pr3bp_dynamics(self, t, state):
         """
         Inputs:
-            t: time
+            t: time (required by solve_ivp but not used in dynamics)
             state: state of the system
-            mu: gravitational parameter of the system
         Outputs:
             dstate/dt: derivative of the state
         """
         x, y, vx, vy = state
-        r1 = np.sqrt((x + self.mu)**2 + y**2)
-        r2 = np.sqrt((x - 1 + self.mu)**2 + y**2)
+        a = np.zeros(2)
+        for obj in self.objects:
+            a += obj.get_gravitational_acceleration(x, y, vx, vy)
         
-        ax = 2 * vy + x - (1 - self.mu)*(x + self.mu)/r1**3 - self.mu*(x - 1 + self.mu)/r2**3
-        ay = -2 * vx + y - (1 - self.mu)*y/r1**3 - self.mu*y/r2**3
-        
-        return [vx, vy, ax, ay]
+        return np.array([vx, vy, a[0], a[1]])
     
     # Simulate the trajectory of the system
     # Updates the self.trajectory and self.t
@@ -74,7 +71,7 @@ class Problem:
         """
         # For shooting method: simulate dynamics with given controls
         # Here, assume zero control and just propagate
-        sol = solve_ivp(self.pr3bp_dynamics, self.t_span, self.initial_conditions, args=(self.mu,), dense_output=True)
+        sol = solve_ivp(self.pr3bp_dynamics, self.t_span, self.initial_conditions, method='RK45', dense_output=True)
         self.trajectory = sol.y.T # state trajectory
         self.t = sol.t # time vector
     
@@ -99,7 +96,7 @@ class Problem:
         # Enforce a minimum radius from Earth
         dists = np.linalg.norm(self.trajectory[:, :2] - self.earth_pos, axis=1)
         
-        # Find the minimum distance
+        # Find the minimum distance in the trajectory
         min_dist = np.min(dists)
 
         # Calculate the error in distance
@@ -161,13 +158,14 @@ class Problem:
             raise ValueError("Trajectory not simulated yet")
         
         # TODO: Plot the constraints
-        # TODO: Plot the planets
 
         # Plot Earth and Sun
-        earth_circle = plt.Circle(self.earth_pos, 0.02, color='blue', label='Earth')
-        sun_circle = plt.Circle((0,0), 0.04, color='yellow', label='Sun')
-        plt.gca().add_patch(earth_circle)
-        plt.gca().add_patch(sun_circle)
+        # Define colors for each planet
+        planet_colors = ["red", "blue", "yellow", "green", "purple", "orange", "brown", "pink", "gray", "cyan", "magenta", "lime", "teal", "olive", "navy", "maroon", "gold", "silver", "black", "white"]
+        for i, obj in enumerate(self.objects):    
+            circle = plt.Circle(obj.position, obj.radius, color=planet_colors[i], label=obj.name)
+            plt.gca().add_patch(circle)
+        
         plt.legend()
 
         # Plot the trajectory
