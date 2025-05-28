@@ -21,12 +21,28 @@ class Object:
         a = self.mass * (self.position - np.array([x, y])) / r**3
         return a
     
+    
     def propagate_position(self, a, cur_t):
         if self.dynamic:
             delta_t = cur_t - self.last_t
-            self.velocity += a * delta_t
-            self.x += self.velocity[0] * delta_t
-            self.y += self.velocity[1] * delta_t
+            # Use RK4 to propagate position and velocity
+            k1v = a
+            k1r = self.velocity
+            
+            k2v = a  # Assuming constant acceleration over small timestep
+            k2r = self.velocity + 0.5 * k1v * delta_t
+            
+            k3v = a
+            k3r = self.velocity + 0.5 * k2v * delta_t
+            
+            k4v = a
+            k4r = self.velocity + k3v * delta_t
+            
+            # Update velocity and position using weighted average of slopes
+            self.velocity -= (k1v + 2*k2v + 2*k3v + k4v) * delta_t / 6
+            self.position += (k1r + 2*k2r + 2*k3r + k4r) * delta_t / 6
+            self.x = self.position[0]
+            self.y = self.position[1]
             self.trajectory = np.vstack((self.trajectory, np.array([self.x, self.y])))
             self.last_t = cur_t
 

@@ -121,7 +121,7 @@ class Problem:
         angle_deg = np.degrees(np.arccos(cos_theta))
 
         # Calculate the error in angle
-        angle_error = (-1 * self.reentry_angle_tolerance) + abs(angle_deg - self.target_angle)
+        angle_error = abs(angle_deg - 90 - self.target_angle) - self.reentry_angle_tolerance
 
         return np.array([angle_error])  # Constraint is positive when outside of tolerance
     
@@ -182,7 +182,7 @@ class Problem:
         # Plot the initial conditions
         plt.scatter(self.initial_conditions[0], self.initial_conditions[1], color="red", label="Initial Conditions")
 
-        plt.title("Simulated PR3BP Trajectory")
+        plt.title("Simulated Satellite Trajectory")
         plt.xlabel("x")
         plt.ylabel("y")
         plt.axis("equal")
