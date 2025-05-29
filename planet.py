@@ -60,9 +60,9 @@ class Object:
     
     def set_protected_zone(self, type):
         if type == "planet":
-            self.protected_zone = 1e3 # km
+            self.protected_zone = 2 * self.radius  # 2× body radius
         elif type == "satellite":
-            self.protected_zone = 50 #km
+            self.protected_zone = 3 * self.radius  # 3× for small objects
         else:
             raise ValueError("Invalid protected zone type")
 
