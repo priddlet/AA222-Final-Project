@@ -78,12 +78,47 @@ def plot_combined_trajectory(phases):
                                 alpha=0.4)
                 plt.gca().add_patch(zone)
         plt.plot(traj[:, 0], traj[:, 1], label=f"Phase {i+1}")
+        
 
-    plt.scatter(phases[0][0][0, 0], phases[0][0][0, 1], color="red", 
+    plt.scatter(phases[0][0][0, 0], phases[0][0][0, 1], color="blue", 
                label="Start")
+    
+    # Plot the burn1 coordinates
+    plt.scatter(phases[0][2].get_burn1_coordinates()[0], phases[0][2].get_burn1_coordinates()[1], color="red")
+    # Get burn1 direction and magnitude from the problem
+    burn1_coords = phases[0][2].get_burn1_coordinates()
+    burn1_direction = phases[0][2].get_burn1_direction()
+    burn1_magnitude = np.linalg.norm(burn1_direction)
+    
+    # Scale arrow length for visualization
+    scale = 2.0
+    arrow_dx = burn1_direction[0] * scale / burn1_magnitude  
+    arrow_dy = burn1_direction[1] * scale / burn1_magnitude
+
+    plt.arrow(burn1_coords[0], burn1_coords[1], 
+             arrow_dx, arrow_dy,
+             head_width=0.2, head_length=0.3, fc='red', ec='red',
+             label='Burn Direction')
+
     plt.title("Full Mission Trajectory")
     plt.xlabel("x")
     plt.ylabel("y")
+
+    # Get min and max coordinates from all trajectories
+    x_coords = []
+    y_coords = []
+    for traj, _, _ in phases:
+        x_coords.extend(traj[:, 0])
+        y_coords.extend(traj[:, 1])
+    
+    # Add some padding (10%) around the trajectory bounds
+    x_min, x_max = min(x_coords), max(x_coords)
+    y_min, y_max = min(y_coords), max(y_coords)
+    padding_x = (x_max - x_min) * 0.1
+    padding_y = (y_max - y_min) * 0.1
+    
+    plt.xlim(x_min - padding_x, x_max + padding_x)
+    plt.ylim(y_min - padding_y, y_max + padding_y)
     plt.axis("equal")
     plt.grid()
     plt.legend()
@@ -93,18 +128,25 @@ def run_apollo_11(earth, moon):
     apollo_11 = Apollo11Mission(earth, moon)
 
     # Plot initial trajectory before optimization
-    apollo_11.problem.lunar_insertion_evaluate(0, 3.2, 0.5) # Get initial unoptimized trajectory
+    # burst_to_trajectory(delta_v, time)
+
+    initial_delta_v = 3.15
+    initial_time = 5
+    apollo_11.problem.burst_to_trajectory(initial_delta_v, initial_time)
     initial_trajectory = apollo_11.problem.trajectory
     initial_control = apollo_11.problem.control_sequence
     initial_problem = apollo_11.problem
     plot_combined_trajectory([(initial_trajectory, initial_control, initial_problem)])
+    constraints = initial_problem.lunar_insertion_evaluate(initial_delta_v, initial_time)
+    print(constraints)
 
-    """# Run the mission optimization
+    """
+    # Run the mission optimization
     apollo_11.run_mission()
     trajectory = apollo_11.trajectory
     control = apollo_11.control_sequence
     problem = apollo_11.problem
-    plot_combined_trajectory([(trajectory, control, problem)])"""
+    plot_combined_trajectory([(trajectory, control, problem), (initial_trajectory, initial_control, initial_problem)])"""
 
 def main():
     """Main function to run the simulation."""

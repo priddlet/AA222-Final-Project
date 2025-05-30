@@ -156,10 +156,10 @@ class CrossEntropyOptimizer:
         self.problem = problem
         self.x0 = x0
         self.x_length = len(x0)
-        # x = [delta_v_amount, time, duration]
-        self.best = self.problem.lunar_insertion_evaluate(self.x0[0], self.x0[1], self.x0[2])
+        # x = [delta_v_amount, time]
+        self.best = self.problem.lunar_insertion_evaluate(self.x0[0], self.x0[1])
 
-    def optimize(self, num_samples, n_best, iterations, initial_variance, decay_rate):
+    def optimize(self, num_samples, n_best, iterations, time_variance, delta_v_variance, decay_rate):
         """Run cross entropy optimization.
         
         Args:
@@ -173,19 +173,20 @@ class CrossEntropyOptimizer:
         """
         # Initialize mean at current best solution
         mean = self.x0
-        variance = initial_variance * np.ones_like(mean)
+        variance = np.array([time_variance, delta_v_variance])
         
         for i in range(iterations):
             # Sample from normal distribution
-            samples = np.random.normal(mean, np.sqrt(variance), 
-                                     size=(num_samples, self.x_length))
+            samples = np.hstack((
+                np.random.normal(mean[0], np.sqrt(variance[0]), size=(num_samples, 1)),  # delta_v
+                np.random.normal(mean[1], np.sqrt(variance[1]), size=(num_samples, 1))   # time
+            ))
             
             # Evaluate all samples
             scores = []
             for sample in samples:
                 score = self.problem.lunar_insertion_evaluate(sample[0], 
-                                                            sample[1], 
-                                                            sample[2])
+                                                            sample[1])
                 scores.append(score)
             
             # Get indices of best samples
@@ -195,7 +196,7 @@ class CrossEntropyOptimizer:
             
             # Update distribution parameters
             mean = np.mean(best_samples, axis=0)
-            variance = np.var(best_samples, axis=0) * decay_rate
+            variance = variance * decay_rate #np.var(best_samples, axis=0) * decay_rate
             
             # Update overall best if improved
             if best_score < self.best:

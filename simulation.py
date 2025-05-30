@@ -45,7 +45,7 @@ class Problem:
         self.t = None
         self.trajectory = None
         self.control_sequence = None
-        self.t_eval = np.linspace(*t_span, 100) # Intervals of the timespan
+        self.t_eval = np.linspace(*t_span, 4000) # Intervals of the timespan
 
         # Earth position in normalized units
         self.earth_pos = np.array([0, 0])
@@ -60,6 +60,9 @@ class Problem:
         self.reentry_angle_tolerance = 1.0
         self.min_allowed_dist = 1e-3
         self.max_terminal_speed = np.sqrt(1 / self.leo_radius)
+
+        self.burn1 = [None, None]
+        self.burn2 = [None, None]
     
     def pr3bp_dynamics(self, t, state):
         """Dynamics equations for the PR3BP.
@@ -82,6 +85,15 @@ class Problem:
             obj.propagate_position(obj.get_gravitational_acceleration(earth.x, earth.y), t)
 
         return np.array([vx, vy, a[0], a[1]])
+    
+    def set_burn1(self, delta_v_amount, index):
+        """Set the first burn.
+        
+        Args:
+            delta_v_amount (float): Amount of delta-v
+            index (int): Index of the burn
+        """
+        self.burn1 = [delta_v_amount, index]
     
     def simulate_trajectory(self):
         """Simulate the trajectory of the system.
@@ -122,16 +134,15 @@ class Problem:
         """
         self.control_sequence = control_sequence
 
-    def lunar_insertion_evaluate(self, delta_v_amount, time, duration):
+    def lunar_insertion_evaluate(self, delta_v_amount, time):
         """Evaluate the lunar insertion constraint.
         
         Args:
             delta_v_amount (float): Amount of delta-v
             time (float): Time
-            duration (float): Duration
         """
         # Propagate the trajectory with the delta-v burst
-        self.burst_to_trajectory(delta_v_amount, time, duration)
+        self.burst_to_trajectory(delta_v_amount, time)
 
         # Evaluate the constraints
 
@@ -152,6 +163,7 @@ class Problem:
         # 2. It comes back to the earth
         # 3. It does an orbit around the earth
         completed_earth_orbit = not np.where(np.diff(np.signbit(earth_distances)))[0] == 3
+
 
         # Time constraint for completing the whole trajectory should also be captured by these constraints
         
@@ -175,16 +187,11 @@ class Problem:
         delta_v_penalty = 10
         penalty += delta_v_penalty * self.total_delta_v_constraint()
 
+
+        print(completed_earth_orbit, completed_moon_orbit, constraints, self.total_delta_v_constraint())
         return penalty
     
-    def lunar_insertion_evaluate_trajectory(self, trajectory):
-        """Evaluate the lunar insertion constraint.
-        
-        Args:
-            trajectory (np.ndarray): Trajectory
-        """
-
-    def burst_to_trajectory(self, delta_v_amount, time, duration):
+    def burst_to_trajectory(self, delta_v_amount, time):
         """Apply a delta-v burst and propagate the trajectory.
         
         Args:
@@ -207,21 +214,16 @@ class Problem:
             v_dir = np.array([vx/v_mag, vy/v_mag])
         else:
             v_dir = np.array([1, 0])  # Default direction if velocity is zero
-            
-        # Create control sequence that applies delta-v in velocity direction
-        control = np.zeros_like(self.control_sequence)
-        burn_duration_idx = int(duration * len(self.t_eval) / (self.t_span[1] - self.t_span[0]))
-        burn_start_idx = time_idx
-        burn_end_idx = min(burn_start_idx + burn_duration_idx, len(control))
-        
+
         # Apply delta-v scaled by direction
-        control[burn_start_idx:burn_end_idx] = delta_v_amount * v_dir.reshape(1, 2)
-        
+        self.control_sequence[time_idx] = delta_v_amount * v_dir
+        self.burn1 = [delta_v_amount, time_idx]
+
         # Store original control sequence
         original_control = self.control_sequence.copy()
         
         # Simulate with burn
-        self.set_control_sequence(control)
+        self.set_control_sequence(self.control_sequence)
         self.simulate_trajectory()
         
         # Restore original control sequence
@@ -234,6 +236,22 @@ class Problem:
             np.ndarray: Constraint violation
         """
         return np.sum(np.linalg.norm(self.control_sequence, axis=1))
+    
+    def get_burn1_coordinates(self):
+        """Get the coordinates of the first burn.
+        
+        Returns:
+            np.ndarray: Coordinates of the first burn
+        """
+        return self.trajectory[self.burn1[1]]
+
+    def get_burn1_direction(self):
+        """Get the direction of the first burn.
+        
+        Returns:
+            np.ndarray: Direction of the first burn
+        """
+        return self.control_sequence[self.burn1[1]]
     
     
     def planetary_orbit_constraint(self):
