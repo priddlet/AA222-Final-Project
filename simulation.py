@@ -22,6 +22,7 @@ class Problem:
         self.t = None
         self.trajectory = None
         self.control_sequence = None
+        self.t_eval = np.linspace(*t_span, 100)
 
         # Earth position in normalized units
         self.earth_pos = np.array([0, 0])
@@ -69,17 +70,32 @@ class Problem:
     # Updates the self.trajectory and self.t
     # TODO: add control input
     def simulate_trajectory(self):
-        """
-        Inputs:
-            t_span: time span of the simulation
-            control_sequence: control sequence for the system
-        """
-        # For shooting method: simulate dynamics with given controls
-        # Here, assume zero control and just propagate
-        sol = solve_ivp(self.pr3bp_dynamics, self.t_span, self.initial_conditions, method='RK45', dense_output=True)
-        self.trajectory = sol.y.T # state trajectory
-        self.t = sol.t # time vector
+        if self.control_sequence is None:
+            # Default: no control
+            self.control_sequence = np.zeros((len(self.t_eval), 2))
+
+        # Create interpolation of control inputs over t_eval
+        control_interp = lambda t: np.array([
+            np.interp(t, self.t_eval, self.control_sequence[:, 0]),
+            np.interp(t, self.t_eval, self.control_sequence[:, 1])
+        ])
+
+        def dynamics_with_control(t, state):
+            x, y, vx, vy = state
+            a = np.zeros(2)
+            for obj in self.objects:
+                a += obj.get_gravitational_acceleration(x, y)
+
+            # Apply control acceleration (assumed already normalized units)
+            delta_v = control_interp(t)
+            return np.array([vx, vy, a[0] + delta_v[0], a[1] + delta_v[1]])
+
+        sol = solve_ivp(dynamics_with_control, self.t_span, self.initial_conditions,
+                        t_eval=self.t_eval, method='RK45', rtol=1e-8, atol=1e-10)
     
+        self.trajectory = sol.y.T
+        self.t = sol.t
+
     # Set the control sequence for the system
     def set_control_sequence(self, control_sequence):
         """
@@ -145,9 +161,16 @@ class Problem:
         Outputs:
             constraints: (ndarray) constraints of the system
         """
-        reentry_angle_error = self.reentry_angle_constraint()
-        planetary_protection_error = self.planetary_protection_constraint()
-        terminal_error = self.terminal_constraint()
+        if self.trajectory is None or len(self.trajectory) == 0:
+            return np.ones(10) * 1e6  # heavy penalty
+
+        try:
+            reentry_angle_error = self.reentry_angle_constraint()
+            planetary_protection_error = self.planetary_protection_constraint()
+            terminal_error = self.terminal_constraint()
+        except Exception as e:
+            print("Constraint eval failed:", e)
+            return np.ones(10) * 1e6  # heavy penalty
 
         return np.concatenate([reentry_angle_error, planetary_protection_error, terminal_error], axis=0)
 
@@ -173,6 +196,11 @@ class Problem:
         for obj in self.objects:    
             circle = plt.Circle(obj.position, obj.radius, color=obj.color, label=obj.name)
             plt.gca().add_patch(circle)
+            
+            if obj.protected_zone is not None:
+                pzone = plt.Circle(obj.position, obj.protected_zone, color=obj.color, linestyle='--', fill=False, alpha=0.3)
+                plt.gca().add_patch(pzone)
+
         
         plt.legend()
 
@@ -188,6 +216,5 @@ class Problem:
         plt.axis("equal")
         plt.grid()
         plt.show()
-    
 
 
