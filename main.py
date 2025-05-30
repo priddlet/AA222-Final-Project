@@ -120,7 +120,7 @@ def plot_combined_trajectory(phases):
     plt.show()
 
 def apollo_11_mission(earth, moon):
-    mission_duration = 2500
+    mission_duration = 1700
     num_steps_per_timestep = 20
     rtol = 1e-8
     atol = 1e-8
@@ -172,7 +172,7 @@ def apollo_11_mission(earth, moon):
     n_best = 3
     iterations = 3
     time_variance = 1e-4
-    delta_v_variance = 1e-4
+    delta_v_variance = 1e-5
     decay_rate = 0.5
 
     # Run the optimization
