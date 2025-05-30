@@ -1,20 +1,43 @@
-# This file contains the simulation code for the 3 body problem
-# It defines a Problem class that contains the initial conditions and the dynamics of the system
-# It also contains the functions to solve the system using the 4th order Runge-Kutta method
+"""Simulation code for the 3-body problem.
+
+This module defines a Problem class that contains the initial conditions and dynamics
+of the system, along with functions to solve the system using the 4th order Runge-Kutta method.
+"""
 
 import numpy as np
 from scipy.integrate import solve_ivp
 import matplotlib.pyplot as plt
 from planet import Object
 
+
 class Problem:
-    # Initialize the problem with the initial conditions
+    """Class representing a 3-body problem simulation.
+    
+    Attributes:
+        initial_conditions (np.ndarray): Initial state vector
+        objects (list[Object]): List of celestial objects
+        t_span (tuple): Time span of simulation
+        t (np.ndarray): Time points
+        trajectory (np.ndarray): State trajectory
+        control_sequence (np.ndarray): Control inputs
+        t_eval (np.ndarray): Time points for evaluation
+        earth_pos (np.ndarray): Earth position
+        leo_radius (float): Low Earth orbit radius
+        sun_pos (np.ndarray): Sun position
+        sun_radius (float): Sun radius
+        target_angle (float): Target reentry angle
+        reentry_angle_tolerance (float): Reentry angle tolerance
+        min_allowed_dist (float): Minimum allowed distance
+        max_terminal_speed (float): Maximum terminal speed
+    """
+    
     def __init__(self, initial_conditions, objects: list[Object], t_span):
-        """
-        Inputs:
-            initial_conditions: initial conditions of the system
-            objects: list of objects in the system
-            t_span: time span of the simulation
+        """Initialize the problem.
+        
+        Args:
+            initial_conditions (np.ndarray): Initial state vector
+            objects (list[Object]): List of celestial objects
+            t_span (tuple): Time span of simulation
         """
         self.initial_conditions = initial_conditions
         self.objects = objects
@@ -26,33 +49,27 @@ class Problem:
 
         # Earth position in normalized units
         self.earth_pos = np.array([0, 0])
-        self.leo_radius = 1# 1 - self.mu
+        self.leo_radius = 1  # 1 - self.mu
 
         # Sun position in normalized units
         self.sun_pos = np.array([5, 0])
         self.sun_radius = 1
 
         # Set the constraint constants
-
-        # Reentry angle constraint
-        # Acceptable corridor: ~6.5 degrees +- 1
-        self.target_angle = 6.5
+        self.target_angle = 6.5  # Acceptable corridor: ~6.5 degrees +- 1
         self.reentry_angle_tolerance = 1.0
-        
-        # Planetary protection constraint
         self.min_allowed_dist = 1e-3
-
-        # Terminal speed constraint
         self.max_terminal_speed = np.sqrt(1 / self.leo_radius)
     
-    # Contains the dynamics equations for the PR3BP
     def pr3bp_dynamics(self, t, state):
-        """
-        Inputs:
-            t: time (required by solve_ivp but not used in dynamics)
-            state: state of the system
-        Outputs:
-            dstate/dt: derivative of the state
+        """Dynamics equations for the PR3BP.
+        
+        Args:
+            t (float): Time (required by solve_ivp but not used)
+            state (np.ndarray): State vector [x, y, vx, vy]
+            
+        Returns:
+            np.ndarray: State derivatives [dx/dt, dy/dt, dvx/dt, dvy/dt]
         """
         x, y, vx, vy = state
         a = np.zeros(2)
@@ -66,10 +83,11 @@ class Problem:
 
         return np.array([vx, vy, a[0], a[1]])
     
-    # Simulate the trajectory of the system
-    # Updates the self.trajectory and self.t
-    # TODO: add control input
     def simulate_trajectory(self):
+        """Simulate the trajectory of the system.
+        
+        Updates self.trajectory and self.t with the simulation results.
+        """
         if self.control_sequence is None:
             # Default: no control
             self.control_sequence = np.zeros((len(self.t_eval), 2))
@@ -91,29 +109,33 @@ class Problem:
             return np.array([vx, vy, a[0] + delta_v[0], a[1] + delta_v[1]])
 
         sol = solve_ivp(dynamics_with_control, self.t_span, self.initial_conditions,
-                        t_eval=self.t_eval, method='RK45', rtol=1e-8, atol=1e-10)
+                       t_eval=self.t_eval, method='RK45', rtol=1e-8, atol=1e-10)
     
         self.trajectory = sol.y.T
         self.t = sol.t
 
-    # Set the control sequence for the system
     def set_control_sequence(self, control_sequence):
-        """
-        Inputs:
-            control_sequence: control sequence for the system
+        """Set the control sequence for the system.
+        
+        Args:
+            control_sequence (np.ndarray): Control sequence
         """
         self.control_sequence = control_sequence
 
-    # Cost function for the delta-v
     def delta_v_cost(self):
-        """
-        Outputs:
-            cost: cost of the delta-v for a given control sequence
+        """Calculate the delta-v cost.
+        
+        Returns:
+            float: Total delta-v cost
         """
         return np.sum(np.linalg.norm(self.control_sequence, axis=1))
     
-    # Placeholder: define avoidance/safe zones
     def planetary_protection_constraint(self):
+        """Calculate planetary protection constraint violations.
+        
+        Returns:
+            np.ndarray: Constraint violations for each object
+        """
         dist_errors = []
         # Calculate the minimum distance to each object
         for obj in self.objects:
@@ -124,8 +146,12 @@ class Problem:
             dist_errors.append(dist_error)
         return np.array(dist_errors)
     
-    # Constrain angle relative to earth entry corridor
     def reentry_angle_constraint(self):
+        """Calculate reentry angle constraint violation.
+        
+        Returns:
+            np.ndarray: Constraint violation
+        """
         x, y, vx, vy = self.trajectory[-1]
         earth = self.objects[0]
         r = np.sqrt((x - earth.position[0])**2 + (y - earth.position[1])**2)
@@ -141,8 +167,12 @@ class Problem:
 
         return np.array([angle_error])  # Constraint is positive when outside of tolerance
     
-    # Constrain terminal error
     def terminal_constraint(self):
+        """Calculate terminal constraint violations.
+        
+        Returns:
+            np.ndarray: Constraint violations [distance error, speed error]
+        """
         x, y, vx, vy = self.trajectory[-1]
         earth = self.objects[0]
         # Calculate the distance to the earth
@@ -155,11 +185,11 @@ class Problem:
 
         return np.array([r_error, v_error])
     
-    # Evaluate the constraints
     def evaluate_constraints(self):
-        """
-        Outputs:
-            constraints: (ndarray) constraints of the system
+        """Evaluate all constraints.
+        
+        Returns:
+            np.ndarray: Combined constraint violations
         """
         if self.trajectory is None or len(self.trajectory) == 0:
             return np.ones(10) * 1e6  # heavy penalty
@@ -174,33 +204,29 @@ class Problem:
 
         return np.concatenate([reentry_angle_error, planetary_protection_error, terminal_error], axis=0)
 
-    # Plot the trajectory of the system
     def plot_trajectory(self):
-        """
-        Inputs:
-            t: time vector
-            y: state trajectory
-        """
+        """Plot the trajectory of the system."""
         # Makes sure the trajectory is simulated
         if self.trajectory is None:
             raise ValueError("Trajectory not simulated yet")
         
-        # TODO: Plot the constraints
-
-        # If any of the objects are dynamic, plot their trajectories
+        # Plot trajectories of dynamic objects
         for obj in self.objects:
             if obj.dynamic:
-                plt.plot(obj.trajectory[:,0], obj.trajectory[:, 1], color=obj.color, label=obj.name)
+                plt.plot(obj.trajectory[:,0], obj.trajectory[:, 1], 
+                        color=obj.color, label=obj.name)
 
         # Plot Earth and Sun
         for obj in self.objects:    
-            circle = plt.Circle(obj.position, obj.radius, color=obj.color, label=obj.name)
+            circle = plt.Circle(obj.position, obj.radius, color=obj.color, 
+                              label=obj.name)
             plt.gca().add_patch(circle)
             
             if obj.protected_zone is not None:
-                pzone = plt.Circle(obj.position, obj.protected_zone, color=obj.color, linestyle='--', fill=False, alpha=0.3)
+                pzone = plt.Circle(obj.position, obj.protected_zone, 
+                                 color=obj.color, linestyle='--', fill=False, 
+                                 alpha=0.3)
                 plt.gca().add_patch(pzone)
-
         
         plt.legend()
 
@@ -208,7 +234,8 @@ class Problem:
         plt.plot(self.trajectory[:, 0], self.trajectory[:, 1])
 
         # Plot the initial conditions
-        plt.scatter(self.initial_conditions[0], self.initial_conditions[1], color="red", label="Initial Conditions")
+        plt.scatter(self.initial_conditions[0], self.initial_conditions[1], 
+                   color="red", label="Initial Conditions")
 
         plt.title("Simulated Satellite Trajectory")
         plt.xlabel("x")
