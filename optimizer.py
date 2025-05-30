@@ -11,7 +11,7 @@ MUT_RATE = 0.1
 N = 100
 
 
-class Optimizer:
+class GeneticOptimizer:
     """Genetic algorithm optimizer for trajectory optimization.
     
     Attributes:
@@ -149,4 +149,62 @@ class Optimizer:
         self.problem.set_control_sequence(self.best_sequence)
         self.problem.simulate_trajectory()
         return self.best_sequence
+
+
+class CrossEntropyOptimizer:
+    def __init__(self, problem, x0):
+        self.problem = problem
+        self.x0 = x0
+        self.x_length = len(x0)
+        # x = [delta_v_amount, time, duration]
+        self.best = self.problem.lunar_insertion_evaluate(self.x0[0], self.x0[1], self.x0[2])
+
+    def optimize(self, num_samples, n_best, iterations, initial_variance, decay_rate):
+        """Run cross entropy optimization.
+        
+        Args:
+            n_best (int): Number of best samples to use for updating distribution
+            iterations (int): Number of iterations to run
+            initial_variance (float): Initial variance of sampling distribution
+            decay_rate (float): Rate at which variance decays each iteration
+            
+        Returns:
+            np.ndarray: Best parameters found
+        """
+        # Initialize mean at current best solution
+        mean = self.x0
+        variance = initial_variance * np.ones_like(mean)
+        
+        for i in range(iterations):
+            # Sample from normal distribution
+            samples = np.random.normal(mean, np.sqrt(variance), 
+                                     size=(num_samples, self.x_length))
+            
+            # Evaluate all samples
+            scores = []
+            for sample in samples:
+                score = self.problem.lunar_insertion_evaluate(sample[0], 
+                                                            sample[1], 
+                                                            sample[2])
+                scores.append(score)
+            
+            # Get indices of best samples
+            best_indices = np.argsort(scores)[:n_best]
+            best_samples = samples[best_indices]
+            best_score = scores[best_indices[0]]
+            
+            # Update distribution parameters
+            mean = np.mean(best_samples, axis=0)
+            variance = np.var(best_samples, axis=0) * decay_rate
+            
+            # Update overall best if improved
+            if best_score < self.best:
+                self.best = best_score
+                self.x0 = samples[best_indices[0]]
+                
+            print(f"Iteration {i}: Best Score = {self.best:.4f}")
+            
+        return self.x0
+        
+
 

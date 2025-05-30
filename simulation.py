@@ -45,7 +45,7 @@ class Problem:
         self.t = None
         self.trajectory = None
         self.control_sequence = None
-        self.t_eval = np.linspace(*t_span, 100)
+        self.t_eval = np.linspace(*t_span, 100) # Intervals of the timespan
 
         # Earth position in normalized units
         self.earth_pos = np.array([0, 0])
@@ -122,16 +122,122 @@ class Problem:
         """
         self.control_sequence = control_sequence
 
-    def delta_v_cost(self):
-        """Calculate the delta-v cost.
+    def lunar_insertion_evaluate(self, delta_v_amount, time, duration):
+        """Evaluate the lunar insertion constraint.
+        
+        Args:
+            delta_v_amount (float): Amount of delta-v
+            time (float): Time
+            duration (float): Duration
+        """
+        # Propagate the trajectory with the delta-v burst
+        self.burst_to_trajectory(delta_v_amount, time, duration)
+
+        # Evaluate the constraints
+
+        # The first constraint is the free return trajectory
+        # We'll give it an inital valid trajectory so we only have to worry about optimizing ours
+
+        # Make sure that we complete one orbit around the moon
+        # This will control the sign of our constraint variable
+        # First find the closest approach to the moon
+        moon = self.objects[1]
+        moon_distances = np.linalg.norm(self.trajectory[:, :2] - moon.position, axis=1)
+        earth_distances = np.linalg.norm(self.trajectory[:, :2] - self.earth_pos, axis=1)
+        # We need to make sure that this changes sign exactly twice
+
+        completed_moon_orbit = not np.where(np.diff(np.signbit(moon_distances)))[0] == 2
+        # This one I think this is 3 because in order to gaurantee the free return trajectory
+        # 1. It needs to leave the earth
+        # 2. It comes back to the earth
+        # 3. It does an orbit around the earth
+        completed_earth_orbit = not np.where(np.diff(np.signbit(earth_distances)))[0] == 3
+
+        # Time constraint for completing the whole trajectory should also be captured by these constraints
+        
+        # Then we want our metric to be the combined error from our target min distance constraints
+        constraints = self.planetary_orbit_constraint()
+
+        # Then we'll create a penalty function that will penalize the constraints
+
+        #Fixed constraint penalties
+        penalty = 0
+        if completed_moon_orbit:
+            penalty += 1e6
+        if completed_earth_orbit:
+            penalty += 1e6
+
+        #Variable constraint penalties
+        dist_penalty = 1
+        penalty += dist_penalty * np.sum(constraints)
+
+        # And then we'll add the total delta-v which is our objective function
+        delta_v_penalty = 10
+        penalty += delta_v_penalty * self.total_delta_v_constraint()
+
+        return penalty
+    
+    def lunar_insertion_evaluate_trajectory(self, trajectory):
+        """Evaluate the lunar insertion constraint.
+        
+        Args:
+            trajectory (np.ndarray): Trajectory
+        """
+
+    def burst_to_trajectory(self, delta_v_amount, time, duration):
+        """Apply a delta-v burst and propagate the trajectory.
+        
+        Args:
+            delta_v_amount (float): Amount of delta-v
+            time (float): Time
+            duration (float): Duration
+        """
+        # Simulate trajectory with delta-v applied in velocity direction
+        if self.trajectory is None:
+            self.simulate_trajectory()
+            
+        # Get state at burn time
+        time_idx = np.abs(self.t - time).argmin()
+        state = self.trajectory[time_idx]
+        vx, vy = state[2:4]
+        
+        # Normalize velocity vector to get direction
+        v_mag = np.sqrt(vx**2 + vy**2)
+        if v_mag > 0:
+            v_dir = np.array([vx/v_mag, vy/v_mag])
+        else:
+            v_dir = np.array([1, 0])  # Default direction if velocity is zero
+            
+        # Create control sequence that applies delta-v in velocity direction
+        control = np.zeros_like(self.control_sequence)
+        burn_duration_idx = int(duration * len(self.t_eval) / (self.t_span[1] - self.t_span[0]))
+        burn_start_idx = time_idx
+        burn_end_idx = min(burn_start_idx + burn_duration_idx, len(control))
+        
+        # Apply delta-v scaled by direction
+        control[burn_start_idx:burn_end_idx] = delta_v_amount * v_dir.reshape(1, 2)
+        
+        # Store original control sequence
+        original_control = self.control_sequence.copy()
+        
+        # Simulate with burn
+        self.set_control_sequence(control)
+        self.simulate_trajectory()
+        
+        # Restore original control sequence
+        self.set_control_sequence(original_control)
+    
+    def total_delta_v_constraint(self):
+        """Calculate total delta-v constraint violation.
         
         Returns:
-            float: Total delta-v cost
+            np.ndarray: Constraint violation
         """
         return np.sum(np.linalg.norm(self.control_sequence, axis=1))
     
-    def planetary_protection_constraint(self):
-        """Calculate planetary protection constraint violations.
+    
+    def planetary_orbit_constraint(self):
+        """Calculate planetary orbit constraint violations.
         
         Returns:
             np.ndarray: Constraint violations for each object
@@ -143,8 +249,11 @@ class Problem:
             min_dist = np.min(dists)
             # Enforce a minimum radius from each object
             dist_error = obj.protected_zone - min_dist
+            max_dist_error = -1 * (obj.ideal_max_orbit - min_dist)
             dist_errors.append(dist_error)
+            dist_errors.append(max_dist_error)
         return np.array(dist_errors)
+    
     
     def reentry_angle_constraint(self):
         """Calculate reentry angle constraint violation.
@@ -196,13 +305,14 @@ class Problem:
 
         try:
             reentry_angle_error = self.reentry_angle_constraint()
-            planetary_protection_error = self.planetary_protection_constraint()
+            planetary_orbit_error = self.planetary_orbit_constraint()
             terminal_error = self.terminal_constraint()
         except Exception as e:
             print("Constraint eval failed:", e)
             return np.ones(10) * 1e6  # heavy penalty
 
-        return np.concatenate([reentry_angle_error, planetary_protection_error, terminal_error], axis=0)
+        return np.concatenate([reentry_angle_error, planetary_orbit_error, terminal_error], axis=0)
+    
 
     def plot_trajectory(self):
         """Plot the trajectory of the system."""
@@ -211,7 +321,7 @@ class Problem:
             raise ValueError("Trajectory not simulated yet")
         
         # Plot trajectories of dynamic objects
-        for obj in self.objects:
+        for obj in self.objects:    
             if obj.dynamic:
                 plt.plot(obj.trajectory[:,0], obj.trajectory[:, 1], 
                         color=obj.color, label=obj.name)

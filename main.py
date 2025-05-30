@@ -3,7 +3,8 @@
 import numpy as np
 from simulation import Problem
 from planet import Object
-from optimizer import Optimizer
+from optimizer import GeneticOptimizer
+from apollo_11 import Apollo11Mission
 import matplotlib.pyplot as plt
 
 # Normalized gravitational constant
@@ -14,34 +15,27 @@ def create_bodies():
     """Create the celestial bodies for the simulation.
     
     Returns:
-        tuple: (earth, moon, sun) objects
+        tuple: (earth, moon) objects
     """
-    earth_radius = 2
-    moon_radius = 1
-    sun_radius = 5
-    safe_gap = 20
+    earth_radius = 6.371  # Earth radius in normalized units
+    moon_radius = 1.737   # Moon radius in normalized units 
+    safe_gap = 384.4     # Average Earth-Moon distance in normalized units
+
 
     earth = Object("Earth", np.array([0.0, 0.0]), earth_radius, G, 100, 
-                  "planet", "blue", [0, 0], False)
+                  "planet", "blue", [0, 0], False, 4 * earth_radius, 2 * earth_radius)
     moon = Object("Moon", np.zeros(2), moon_radius, G, 20, 
-                 "satellite", "gray", [0, 0.2], False)
-    sun = Object("Sun", np.zeros(2), sun_radius, G, 50, 
-                "planet", "yellow", [0, 0], False)
+                 "satellite", "gray", [0, 0.2], False, 4 * moon_radius, 2 * moon_radius)
 
     earth.set_protected_zone("planet")      # 2 * radius
     moon.set_protected_zone("satellite")    # 3 * radius
-    sun.set_protected_zone("planet")
 
     moon_distance = earth.protected_zone + moon.protected_zone + safe_gap
-    sun_distance = moon_distance / 2
 
     moon.position = np.array([moon_distance, 0.0])
     moon.x, moon.y = moon.position
 
-    sun.position = np.array([sun_distance, -500.0])
-    sun.x, sun.y = sun.position
-
-    return earth, moon, sun
+    return earth, moon
 
 
 def run_phase(name, initial_conditions, t_span, bodies):
@@ -59,7 +53,7 @@ def run_phase(name, initial_conditions, t_span, bodies):
     problem = Problem(initial_conditions, bodies, t_span)
     t_n = 100  # number of time steps per phase
     problem.t_eval = np.linspace(*t_span, t_n)
-    optimizer = Optimizer(problem, t_n=t_n)
+    optimizer = GeneticOptimizer(problem, t_n=t_n)
     best_control = optimizer.optimize()
     problem.set_control_sequence(best_control)
     problem.simulate_trajectory()
@@ -95,21 +89,31 @@ def plot_combined_trajectory(phases):
     plt.legend()
     plt.show()
 
+def run_apollo_11(earth, moon):
+    apollo_11 = Apollo11Mission(earth, moon)
 
-def apollo_11_mission():
-    """Run the Apollo 11 mission simulation.
-    
-    This function is currently not implemented.
-    """
-    raise NotImplementedError("Not implemented")
+    # Plot initial trajectory before optimization
+    apollo_11.problem.lunar_insertion_evaluate(0, 3.2, 0.5) # Get initial unoptimized trajectory
+    initial_trajectory = apollo_11.problem.trajectory
+    initial_control = apollo_11.problem.control_sequence
+    initial_problem = apollo_11.problem
+    plot_combined_trajectory([(initial_trajectory, initial_control, initial_problem)])
 
+    """# Run the mission optimization
+    apollo_11.run_mission()
+    trajectory = apollo_11.trajectory
+    control = apollo_11.control_sequence
+    problem = apollo_11.problem
+    plot_combined_trajectory([(trajectory, control, problem)])"""
 
 def main():
     """Main function to run the simulation."""
-    earth, moon, sun = create_bodies()
-    bodies = [earth, moon, sun]
+    earth, moon = create_bodies()
+    bodies = [earth, moon]
 
     # Define mission segments
+    # TODO: Start here and modify the time scheme throughout everything
+    # We want this
     t1, t2, t3 = (0, 5), (0, 5), (0, 5)
     x0 = np.array([1, -10, 3, 1])
 
@@ -130,4 +134,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    #main()
+    earth, moon = create_bodies()
+    bodies = [earth, moon]
+    run_apollo_11(earth, moon)
