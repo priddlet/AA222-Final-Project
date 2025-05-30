@@ -19,8 +19,9 @@ class Problem:
         t_span (tuple): Time span of simulation
         t (np.ndarray): Time points
         trajectory (np.ndarray): State trajectory
-        control_sequence (np.ndarray): Control inputs
+        control_sequence (list[Burn]): Control inputs [delta_vx, delta_vy, time] for each burn
         t_eval (np.ndarray): Time points for evaluation
+        num_steps (int): Number of timesteps in simulation
         earth_pos (np.ndarray): Earth position
         leo_radius (float): Low Earth orbit radius
         sun_pos (np.ndarray): Sun position
@@ -31,21 +32,25 @@ class Problem:
         max_terminal_speed (float): Maximum terminal speed
     """
     
-    def __init__(self, initial_conditions, objects: list[Object], t_span):
+    def __init__(self, initial_conditions, objects: list[Object], mission_duration, num_steps_per_timestep):
         """Initialize the problem.
         
         Args:
             initial_conditions (np.ndarray): Initial state vector
             objects (list[Object]): List of celestial objects
             t_span (tuple): Time span of simulation
+            num_steps (int): Number of timesteps in simulation
         """
         self.initial_conditions = initial_conditions
         self.objects = objects
-        self.t_span = t_span
+        self.mission_duration = mission_duration
+        self.num_steps_per_timestep = num_steps_per_timestep
+        self.num_steps = num_steps_per_timestep * mission_duration
+        self.t_span = (0, mission_duration)
         self.t = None
         self.trajectory = None
-        self.control_sequence = None
-        self.t_eval = np.linspace(*t_span, 4000) # Intervals of the timespan
+        self.control_sequence = []  # Three burns, each with [delta_vx, delta_vy, time]
+        self.t_eval = np.linspace(*self.t_span, self.num_steps)  # Uniform timesteps
 
         # Earth position in normalized units
         self.earth_pos = np.array([0, 0])
@@ -61,8 +66,19 @@ class Problem:
         self.min_allowed_dist = 1e-3
         self.max_terminal_speed = np.sqrt(1 / self.leo_radius)
 
-        self.burn1 = [None, None]
-        self.burn2 = [None, None]
+    class Burn:
+        def __init__(self, delta_v, time, time_index):
+            self.coordinates = None
+            self.delta_v = delta_v
+            self.time = time
+            self.time_index = time_index
+        def set_coordinates(self, coordinates):
+            self.coordinates = coordinates
+        def get_direction(self):
+            return self.delta_v / np.linalg.norm(self.delta_v)
+        def get_magnitude(self):
+            return np.linalg.norm(self.delta_v)
+
     
     def pr3bp_dynamics(self, t, state):
         """Dynamics equations for the PR3BP.
@@ -86,53 +102,60 @@ class Problem:
 
         return np.array([vx, vy, a[0], a[1]])
     
-    def set_burn1(self, delta_v_amount, index):
-        """Set the first burn.
-        
-        Args:
-            delta_v_amount (float): Amount of delta-v
-            index (int): Index of the burn
-        """
-        self.burn1 = [delta_v_amount, index]
     
-    def simulate_trajectory(self):
-        """Simulate the trajectory of the system.
+    def simulate_trajectory(self, rtol_sim, atol_sim):
+        """Simulate the trajectory of the system by handling each burn separately.
         
         Updates self.trajectory and self.t with the simulation results.
         """
-        if self.control_sequence is None:
-            # Default: no control
-            self.control_sequence = np.zeros((len(self.t_eval), 2))
-
-        # Create interpolation of control inputs over t_eval
-        control_interp = lambda t: np.array([
-            np.interp(t, self.t_eval, self.control_sequence[:, 0]),
-            np.interp(t, self.t_eval, self.control_sequence[:, 1])
-        ])
-
-        def dynamics_with_control(t, state):
-            x, y, vx, vy = state
-            a = np.zeros(2)
-            for obj in self.objects:
-                a += obj.get_gravitational_acceleration(x, y)
-
-            # Apply control acceleration (assumed already normalized units)
-            delta_v = control_interp(t)
-            return np.array([vx, vy, a[0] + delta_v[0], a[1] + delta_v[1]])
-
-        sol = solve_ivp(dynamics_with_control, self.t_span, self.initial_conditions,
-                       t_eval=self.t_eval, method='RK45', rtol=1e-8, atol=1e-10)
-    
-        self.trajectory = sol.y.T
-        self.t = sol.t
-
-    def set_control_sequence(self, control_sequence):
-        """Set the control sequence for the system.
+        # Initialize trajectory storage
+        all_trajectories = []
+        all_times = []
         
-        Args:
-            control_sequence (np.ndarray): Control sequence
-        """
-        self.control_sequence = control_sequence
+        # Start with initial conditions
+        current_state = self.initial_conditions
+        current_time_index = 0
+        
+        # Simulate between each burn
+        for burn in self.control_sequence:
+            # Simulate up to the burn time
+            t_span = (self.t_eval[current_time_index], burn.time)
+            t_eval= self.t_eval[current_time_index:burn.time_index]
+            
+            # Simulate without control
+            sol = solve_ivp(self.pr3bp_dynamics, t_span, current_state,
+                            t_eval=t_eval, method='RK45', rtol=rtol_sim, atol=atol_sim)
+            
+            # Store trajectory up to burn
+            all_trajectories.append(sol.y.T)
+            all_times.append(sol.t)
+            
+            # Apply burn
+            current_state = sol.y.T[-1].copy()
+            current_state[2:4] += burn.delta_v  # Add delta-v to velocity
+            current_time_index = burn.time_index
+
+            # Update the location of the burn
+            burn.set_coordinates(current_state[:2])
+            
+            print(f"Applied burn at t={burn.time}:")
+            print(f"  Delta-v: {burn.delta_v}")
+            print(f"  New velocity: {current_state[2:4]}")
+        
+        # Simulate final segment
+        t_span = (self.t_eval[current_time_index], self.t_span[1])
+        t_eval = self.t_eval[current_time_index:]
+        sol = solve_ivp(self.pr3bp_dynamics, t_span, current_state,
+                       t_eval=t_eval, method='RK45', rtol=1e-8, atol=1e-10)
+        
+        # Store final segment
+        all_trajectories.append(sol.y.T)
+        all_times.append(sol.t)
+        
+        # Combine all trajectories
+        self.trajectory = np.vstack(all_trajectories)
+        self.t = np.concatenate(all_times)
+
 
     def lunar_insertion_evaluate(self, delta_v_amount, time):
         """Evaluate the lunar insertion constraint.
@@ -141,8 +164,6 @@ class Problem:
             delta_v_amount (float): Amount of delta-v
             time (float): Time
         """
-        # Propagate the trajectory with the delta-v burst
-        self.burst_to_trajectory(delta_v_amount, time)
 
         # Evaluate the constraints
 
@@ -191,20 +212,20 @@ class Problem:
         print(completed_earth_orbit, completed_moon_orbit, constraints, self.total_delta_v_constraint())
         return penalty
     
-    def burst_to_trajectory(self, delta_v_amount, time):
-        """Apply a delta-v burst and propagate the trajectory.
+    def add_burn_to_trajectory(self, delta_v_amount, time, rtol, atol):
+        """Apply a delta-v burn to the trajectory.
         
         Args:
             delta_v_amount (float): Amount of delta-v
             time (float): Time
-            duration (float): Duration
         """
-        # Simulate trajectory with delta-v applied in velocity direction
+        # Get velocity direction at burn time
         if self.trajectory is None:
-            self.simulate_trajectory()
+            self.simulate_trajectory(rtol, atol)
             
         # Get state at burn time
-        time_idx = np.abs(self.t - time).argmin()
+        time_idx = np.abs(self.t_eval - time).argmin()
+        effective_burn_time = self.t_eval[time_idx]
         state = self.trajectory[time_idx]
         vx, vy = state[2:4]
         
@@ -215,43 +236,25 @@ class Problem:
         else:
             v_dir = np.array([1, 0])  # Default direction if velocity is zero
 
-        # Apply delta-v scaled by direction
-        self.control_sequence[time_idx] = delta_v_amount * v_dir
-        self.burn1 = [delta_v_amount, time_idx]
+        # Add the burn to the control sequence
+        self.control_sequence.append(self.Burn(
+            np.array([delta_v_amount * v_dir[0],  delta_v_amount * v_dir[1]]),
+            effective_burn_time,
+            time_idx
+        ))
+        
 
-        # Store original control sequence
-        original_control = self.control_sequence.copy()
-        
-        # Simulate with burn
-        self.set_control_sequence(self.control_sequence)
-        self.simulate_trajectory()
-        
-        # Restore original control sequence
-        self.set_control_sequence(original_control)
     
     def total_delta_v_constraint(self):
         """Calculate total delta-v constraint violation.
         
         Returns:
-            np.ndarray: Constraint violation
+            float: Total delta-v used
         """
-        return np.sum(np.linalg.norm(self.control_sequence, axis=1))
-    
-    def get_burn1_coordinates(self):
-        """Get the coordinates of the first burn.
-        
-        Returns:
-            np.ndarray: Coordinates of the first burn
-        """
-        return self.trajectory[self.burn1[1]]
-
-    def get_burn1_direction(self):
-        """Get the direction of the first burn.
-        
-        Returns:
-            np.ndarray: Direction of the first burn
-        """
-        return self.control_sequence[self.burn1[1]]
+        total_delta_v = 0
+        for burn in self.control_sequence:
+            total_delta_v += burn.get_magnitude()
+        return total_delta_v
     
     
     def planetary_orbit_constraint(self):

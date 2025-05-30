@@ -3,8 +3,7 @@
 import numpy as np
 from simulation import Problem
 from planet import Object
-from optimizer import GeneticOptimizer
-from apollo_11 import Apollo11Mission
+from optimizer import GeneticOptimizer  
 import matplotlib.pyplot as plt
 
 # Normalized gravitational constant
@@ -20,15 +19,16 @@ def create_bodies():
     earth_radius = 6.371  # Earth radius in normalized units
     moon_radius = 1.737   # Moon radius in normalized units 
     safe_gap = 384.4     # Average Earth-Moon distance in normalized units
-
+    earth_protected_zone = 1 * earth_radius
+    moon_protected_zone = 2 * moon_radius
+    earth_max_orbit = 4 * earth_radius
+    moon_max_orbit = 4 * moon_radius
 
     earth = Object("Earth", np.array([0.0, 0.0]), earth_radius, G, 100, 
-                  "planet", "blue", [0, 0], False, 4 * earth_radius, 2 * earth_radius)
+                  "planet", "blue", [0, 0], False, earth_max_orbit, earth_protected_zone)
     moon = Object("Moon", np.zeros(2), moon_radius, G, 20, 
-                 "satellite", "gray", [0, 0.2], False, 4 * moon_radius, 2 * moon_radius)
+                 "satellite", "gray", [0, 0.2], False, moon_max_orbit, moon_protected_zone)
 
-    earth.set_protected_zone("planet")      # 2 * radius
-    moon.set_protected_zone("satellite")    # 3 * radius
 
     moon_distance = earth.protected_zone + moon.protected_zone + safe_gap
 
@@ -38,7 +38,7 @@ def create_bodies():
     return earth, moon
 
 
-def run_phase(name, initial_conditions, t_span, bodies):
+def run_phase(name, initial_conditions, t_span, bodies, num_steps=1000):
     """Run a single mission phase.
     
     Args:
@@ -46,16 +46,14 @@ def run_phase(name, initial_conditions, t_span, bodies):
         initial_conditions (np.ndarray): Initial state
         t_span (tuple): Time span
         bodies (list): List of celestial bodies
+        num_steps (int): Number of timesteps in simulation
         
     Returns:
         tuple: (trajectory, control_sequence, problem)
     """
-    problem = Problem(initial_conditions, bodies, t_span)
-    t_n = 100  # number of time steps per phase
-    problem.t_eval = np.linspace(*t_span, t_n)
-    optimizer = GeneticOptimizer(problem, t_n=t_n)
+    problem = Problem(initial_conditions, bodies, t_span, num_steps=num_steps)
+    optimizer = GeneticOptimizer(problem, t_n=num_steps)
     best_control = optimizer.optimize()
-    problem.set_control_sequence(best_control)
     problem.simulate_trajectory()
     return problem.trajectory, problem.control_sequence, problem
 
@@ -77,29 +75,25 @@ def plot_combined_trajectory(phases):
                                 color=obj.color, fill=False, linestyle='--', 
                                 alpha=0.4)
                 plt.gca().add_patch(zone)
+            if obj.ideal_max_orbit:
+                zone = plt.Circle(obj.position, obj.ideal_max_orbit, 
+                                color=obj.color, fill=False, linestyle='--', 
+                                alpha=0.4)
+                plt.gca().add_patch(zone)
         plt.plot(traj[:, 0], traj[:, 1], label=f"Phase {i+1}")
         
 
     plt.scatter(phases[0][0][0, 0], phases[0][0][0, 1], color="blue", 
                label="Start")
     
-    # Plot the burn1 coordinates
-    plt.scatter(phases[0][2].get_burn1_coordinates()[0], phases[0][2].get_burn1_coordinates()[1], color="red")
-    # Get burn1 direction and magnitude from the problem
-    burn1_coords = phases[0][2].get_burn1_coordinates()
-    burn1_direction = phases[0][2].get_burn1_direction()
-    burn1_magnitude = np.linalg.norm(burn1_direction)
-    
-    # Scale arrow length for visualization
-    scale = 2.0
-    arrow_dx = burn1_direction[0] * scale / burn1_magnitude  
-    arrow_dy = burn1_direction[1] * scale / burn1_magnitude
-
-    plt.arrow(burn1_coords[0], burn1_coords[1], 
-             arrow_dx, arrow_dy,
-             head_width=0.2, head_length=0.3, fc='red', ec='red',
-             label='Burn Direction')
-
+    # Plot the burn coordinates and directions with scaled arrows
+    for burn in phases[0][2].control_sequence:
+        plt.scatter(burn.coordinates[0], burn.coordinates[1], color="red")
+        plt.arrow(burn.coordinates[0], burn.coordinates[1], 
+                 burn.delta_v[0], burn.delta_v[1],
+                 head_width=0.2, head_length=0.3, fc='red', ec='red',
+                 label='Burn Direction')
+   
     plt.title("Full Mission Trajectory")
     plt.xlabel("x")
     plt.ylabel("y")
@@ -124,45 +118,73 @@ def plot_combined_trajectory(phases):
     plt.legend()
     plt.show()
 
-def run_apollo_11(earth, moon):
-    apollo_11 = Apollo11Mission(earth, moon)
+def apollo_11_mission(earth, moon):
+    mission_duration = 2000
+    num_steps_per_timestep = 100
+    rtol_sim = 1e-6
+    atol_sim = 1e-6
 
-    # Plot initial trajectory before optimization
-    # burst_to_trajectory(delta_v, time)
+    # Initial conditions for free return trajectory
+    # Starting from low Earth orbit
+    earth_radius = earth.radius
+    leo_altitude = 0.2  # km above Earth's surface (in normalized units)
+    leo_radius = earth_radius + leo_altitude
 
-    initial_delta_v = 3.15
-    initial_time = 5
-    apollo_11.problem.burst_to_trajectory(initial_delta_v, initial_time)
-    initial_trajectory = apollo_11.problem.trajectory
-    initial_control = apollo_11.problem.control_sequence
-    initial_problem = apollo_11.problem
+    # Solve for circular orbit velocity
+    circular_orbit_velocity = np.sqrt(G * earth.mass / leo_radius)
+    
+    # Initial position and velocity for circular orbit
+    initial_conditions = np.array([
+        leo_radius,  # x position
+        0,              # y position
+        0,              # x velocity
+        circular_orbit_velocity            # y velocity (circular orbit velocity ~7.8 km/s)
+    ])
+
+    apollo_11 = Problem(initial_conditions, [earth, moon], mission_duration, num_steps_per_timestep)
+
+    # Define the three burns for the free return trajectory
+    # 1. TLI (Trans-Lunar Injection) burn
+    tli_delta_v = 1.54 # km/s
+    tli_time = 5    # minutes after launch
+    apollo_11.add_burn_to_trajectory(tli_delta_v, tli_time, rtol_sim, atol_sim)
+    apollo_11.simulate_trajectory(rtol_sim, atol_sim)
+
+    """# 2. Mid-course correction burn (if needed)
+    mcc_delta_v = 0.1  # km/s
+    mcc_time = 30.0   # minutes after launch
+    apollo_11.problem.burn_to_trajectory(mcc_delta_v, mcc_time, burn_index=1)
+
+    # 3. Return trajectory correction burn
+    rtc_delta_v = 0.2  # km/s
+    rtc_time = 60.0   # minutes after launch
+    apollo_11.problem.burn_to_trajectory(rtc_delta_v, rtc_time, burn_index=2)"""
+
+    # Get the final trajectory and plot it
+    initial_trajectory = apollo_11.trajectory
+    initial_control = apollo_11.control_sequence
+    initial_problem = apollo_11
     plot_combined_trajectory([(initial_trajectory, initial_control, initial_problem)])
-    constraints = initial_problem.lunar_insertion_evaluate(initial_delta_v, initial_time)
-    print(constraints)
-
-    """
-    # Run the mission optimization
-    apollo_11.run_mission()
-    trajectory = apollo_11.trajectory
-    control = apollo_11.control_sequence
-    problem = apollo_11.problem
-    plot_combined_trajectory([(trajectory, control, problem), (initial_trajectory, initial_control, initial_problem)])"""
+    
+    # Evaluate constraints
+    constraints = initial_problem.lunar_insertion_evaluate(tli_delta_v, tli_time)
+    print("Constraints:", constraints)
+    print("Total delta-v:", initial_problem.total_delta_v_constraint())
 
 def main():
     """Main function to run the simulation."""
     earth, moon = create_bodies()
     bodies = [earth, moon]
 
-    # Define mission segments
-    # TODO: Start here and modify the time scheme throughout everything
-    # We want this
+    # Define mission segments with uniform timesteps
+    num_steps = 1000  # Number of timesteps per phase
     t1, t2, t3 = (0, 5), (0, 5), (0, 5)
     x0 = np.array([1, -10, 3, 1])
 
     # Run all phases
-    traj1, ctrl1, prob1 = run_phase("Earth to Moon", x0, t1, bodies)
-    traj2, ctrl2, prob2 = run_phase("Lunar Orbit", traj1[-1], t2, bodies)
-    traj3, ctrl3, prob3 = run_phase("Return to Earth", traj2[-1], t3, bodies)
+    traj1, ctrl1, prob1 = run_phase("Earth to Moon", x0, t1, bodies, num_steps=num_steps)
+    traj2, ctrl2, prob2 = run_phase("Lunar Orbit", traj1[-1], t2, bodies, num_steps=num_steps)
+    traj3, ctrl3, prob3 = run_phase("Return to Earth", traj2[-1], t3, bodies, num_steps=num_steps)
 
     # Combine trajectories and controls
     full_trajectory = np.vstack([traj1, traj2, traj3])
@@ -179,4 +201,4 @@ if __name__ == "__main__":
     #main()
     earth, moon = create_bodies()
     bodies = [earth, moon]
-    run_apollo_11(earth, moon)
+    apollo_11_mission(earth, moon)
