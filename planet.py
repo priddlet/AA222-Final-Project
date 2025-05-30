@@ -31,6 +31,7 @@ class Object:
             color (str): Color for visualization
             initial_velocity (np.ndarray): Initial velocity vector
             dynamic (bool): Whether the object moves
+            max_orbit (float): Maximum orbit radius
         """
         self.name = name
         self.position = position

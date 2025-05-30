@@ -152,57 +152,91 @@ class GeneticOptimizer:
 
 
 class CrossEntropyOptimizer:
-    def __init__(self, problem, x0):
+    def __init__(self, problem, x0, min_time_step, max_time_step, min_delta_v, max_delta_v, rtol, atol):
         self.problem = problem
         self.x0 = x0
         self.x_length = len(x0)
         # x = [delta_v_amount, time]
-        self.best = self.problem.lunar_insertion_evaluate(self.x0[0], self.x0[1])
+        self.min_time_step = min_time_step
+        self.max_time_step = max_time_step
+        self.min_delta_v = min_delta_v
+        self.max_delta_v = max_delta_v
+        self.rtol = rtol
+        self.atol = atol
+        self.best, self.valid = self.problem.lunar_insertion_evaluate(False)
 
     def optimize(self, num_samples, n_best, iterations, time_variance, delta_v_variance, decay_rate):
         """Run cross entropy optimization.
         
         Args:
+            num_samples (int): Number of samples to generate per iteration
             n_best (int): Number of best samples to use for updating distribution
             iterations (int): Number of iterations to run
-            initial_variance (float): Initial variance of sampling distribution
+            time_variance (float): Variance for time sampling
+            delta_v_variance (float): Variance for delta-v sampling
             decay_rate (float): Rate at which variance decays each iteration
             
         Returns:
-            np.ndarray: Best parameters found
+            np.ndarray: Best parameters found [time, delta_v]
         """
         # Initialize mean at current best solution
-        mean = self.x0
+        mean = self.x0.copy()  # [time, delta_v]
         variance = np.array([time_variance, delta_v_variance])
         
         for i in range(iterations):
-            # Sample from normal distribution
-            samples = np.hstack((
-                np.random.normal(mean[0], np.sqrt(variance[0]), size=(num_samples, 1)),  # delta_v
-                np.random.normal(mean[1], np.sqrt(variance[1]), size=(num_samples, 1))   # time
-            ))
+            # Generate samples for time and delta_v
+            time_samples = np.random.normal(mean[0], np.sqrt(variance[0]), size=(num_samples, 1))
+            delta_v_samples = np.random.normal(mean[1], np.sqrt(variance[1]), size=(num_samples, 1))
+            
+            # Clip samples to valid ranges
+            time_samples = np.clip(time_samples, self.min_time_step, self.max_time_step)
+            delta_v_samples = np.clip(delta_v_samples, self.min_delta_v, self.max_delta_v)
+            
+            # Combine samples
+            samples = np.hstack((time_samples, delta_v_samples))
             
             # Evaluate all samples
             scores = []
-            for sample in samples:
-                score = self.problem.lunar_insertion_evaluate(sample[0], 
-                                                            sample[1])
-                scores.append(score)
+            valid_samples = []
             
-            # Get indices of best samples
+            for sample in samples:
+                print(f"Evaluating sample: time={sample[0]:.4f}, delta_v={sample[1]:.4f}")
+                
+                # Reset simulation state and add new burn
+                self.problem.clear_control_sequence()
+                self.problem.add_burn_to_trajectory(sample[1], sample[0], self.rtol, self.atol)
+                self.problem.simulate_trajectory(self.rtol, self.atol)
+                #self.problem.plot_trajectory()
+                
+                # Evaluate trajectory
+                score, valid_trajectory = self.problem.lunar_insertion_evaluate(False)
+                
+                if valid_trajectory:
+                    print(f"Valid trajectory found in iteration {i}")
+                    scores.append(score)
+                    valid_samples.append(sample)
+            
+            # Handle case where no valid trajectories are found
+            if len(scores) == 0:
+                print(f"No valid trajectories found in iteration {i}")
+                variance = variance * decay_rate
+                continue
+                
+            # Get best samples
             best_indices = np.argsort(scores)[:n_best]
-            best_samples = samples[best_indices]
+            best_samples = np.array([valid_samples[i] for i in best_indices])
             best_score = scores[best_indices[0]]
             
             # Update distribution parameters
             mean = np.mean(best_samples, axis=0)
-            variance = variance * decay_rate #np.var(best_samples, axis=0) * decay_rate
+            variance = variance * decay_rate
             
             # Update overall best if improved
             if best_score < self.best:
                 self.best = best_score
-                self.x0 = samples[best_indices[0]]
-                
+                self.x0 = best_samples[0]
+                print(f"Updated best score to {self.best:.4f} with parameters {self.x0}")
+
             print(f"Iteration {i}: Best Score = {self.best:.4f}")
             
         return self.x0

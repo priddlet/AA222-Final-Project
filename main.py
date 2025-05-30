@@ -5,6 +5,7 @@ from simulation import Problem
 from planet import Object
 from optimizer import GeneticOptimizer  
 import matplotlib.pyplot as plt
+from optimizer import CrossEntropyOptimizer
 
 # Normalized gravitational constant
 G = 1
@@ -119,10 +120,10 @@ def plot_combined_trajectory(phases):
     plt.show()
 
 def apollo_11_mission(earth, moon):
-    mission_duration = 2000
-    num_steps_per_timestep = 100
-    rtol_sim = 1e-6
-    atol_sim = 1e-6
+    mission_duration = 2500
+    num_steps_per_timestep = 20
+    rtol = 1e-8
+    atol = 1e-8
 
     # Initial conditions for free return trajectory
     # Starting from low Earth orbit
@@ -147,13 +148,43 @@ def apollo_11_mission(earth, moon):
     # 1. TLI (Trans-Lunar Injection) burn
     tli_delta_v = 1.54 # km/s
     tli_time = 5    # minutes after launch
-    apollo_11.add_burn_to_trajectory(tli_delta_v, tli_time, rtol_sim, atol_sim)
-    apollo_11.simulate_trajectory(rtol_sim, atol_sim)
+    apollo_11.add_burn_to_trajectory(tli_delta_v, tli_time, rtol, atol)
+    apollo_11.simulate_trajectory(rtol, atol)
 
     # Evaluate constraints and print them
+    print("\nInitial trajectory:")
     verbose = True
-    constraints = apollo_11.lunar_insertion_evaluate(verbose)
+    constraints, valid_trajectory = apollo_11.lunar_insertion_evaluate(verbose)
+    initial_trajectory = apollo_11.trajectory
+    initial_control = apollo_11.control_sequence
 
+    # Now we're going to optimize the first part of the trajectory
+
+    # Define the optimizer parameters
+    x0 = np.array([tli_time, tli_delta_v])
+    min_time_step = 1 / num_steps_per_timestep
+    max_time_step = 10
+    min_delta_v = -10
+    max_delta_v = 10
+
+    # Define the optimization parameters
+    num_samples = 400
+    n_best = 3
+    iterations = 3
+    time_variance = 1e-4
+    delta_v_variance = 1e-4
+    decay_rate = 0.5
+
+    # Run the optimization
+    optimizer = CrossEntropyOptimizer(apollo_11, x0, min_time_step, max_time_step, min_delta_v, max_delta_v, rtol, atol)
+    best_control = optimizer.optimize(num_samples, n_best, iterations, time_variance, delta_v_variance, decay_rate)
+
+    # Add the burn to the trajectory
+    apollo_11.clear_control_sequence()
+    apollo_11.add_burn_to_trajectory(best_control[0], best_control[1], rtol, atol)
+    apollo_11.simulate_trajectory(rtol, atol)
+    print("\nOptimized trajectory:")
+    constraints, valid_trajectory = apollo_11.lunar_insertion_evaluate(True)
 
     """# 2. Mid-course correction burn (if needed)
     mcc_delta_v = 0.1  # km/s
@@ -166,10 +197,8 @@ def apollo_11_mission(earth, moon):
     apollo_11.problem.burn_to_trajectory(rtc_delta_v, rtc_time, burn_index=2)"""
 
     # Get the final trajectory and plot it
-    initial_trajectory = apollo_11.trajectory
-    initial_control = apollo_11.control_sequence
-    initial_problem = apollo_11
-    plot_combined_trajectory([(initial_trajectory, initial_control, initial_problem)])
+    plot_combined_trajectory([(initial_trajectory, initial_control, apollo_11), 
+                              (apollo_11.trajectory, apollo_11.control_sequence, apollo_11)])
 
 def main():
     """Main function to run the simulation."""

@@ -137,10 +137,6 @@ class Problem:
 
             # Update the location of the burn
             burn.set_coordinates(current_state[:2])
-            
-            print(f"Applied burn at t={burn.time}:")
-            print(f"  Delta-v: {burn.delta_v}")
-            print(f"  New velocity: {current_state[2:4]}")
         
         # Simulate final segment
         t_span = (self.t_eval[current_time_index], self.t_span[1])
@@ -177,6 +173,7 @@ class Problem:
         moon_y_displacement = self.trajectory[:, 1] - moon.position[1]
         completed_moon_orbit = False
         free_return_trajectory = False
+        finish_time = np.inf
 
         # Check if the trajectory crosses the moon's x-axis twice
         first_cross_index = None
@@ -208,7 +205,7 @@ class Problem:
             last_sign = earth_x_displacement[0] > 0
             earth_first_cross_index = None
             earth_second_cross_index = None
-            for i in range(len(earth_x_displacement)):
+            for i in range(second_cross_index, len(earth_x_displacement)):
                 if earth_x_displacement[i] > 0 != last_sign:
                     if earth_first_cross_index is None:
                         earth_first_cross_index = i
@@ -224,7 +221,7 @@ class Problem:
                                            or (earth_first_cross_y < 0 and earth_second_cross_y < 0))
 
         # Time constraint for completing the whole trajectory should also be captured by these constraints
-        
+
         # Then we want our metric to be the combined error from our target min distance constraints
         constraints = self.planetary_orbit_constraint()
 
@@ -232,9 +229,9 @@ class Problem:
 
         #Fixed constraint penalties
         penalty = 0
-        if completed_moon_orbit:
+        if not completed_moon_orbit:
             penalty += 1e6
-        if free_return_trajectory:
+        if not free_return_trajectory:
             penalty += 1e6
 
         #Variable constraint penalties
@@ -242,19 +239,30 @@ class Problem:
         penalty += dist_penalty * np.sum(constraints)
 
         # And then we'll add the total delta-v which is our objective function
-        delta_v_penalty = 10
+        delta_v_penalty = 100
         penalty += delta_v_penalty * self.total_delta_v_constraint()
 
+        # Add the time penalty
+        if free_return_trajectory:
+            # Get the time it takes to complete the orbit around the earth
+            finish_time = self.t_eval[earth_second_cross_index]
+            time_penalty = 1
+            penalty += time_penalty * finish_time
+        else:
+            penalty += 1e6
+        
+        valid_trajectory = completed_moon_orbit and free_return_trajectory and np.all(constraints <= 0)
+
         if verbose:
+            print("Valid trajectory:", valid_trajectory)
             print("Completed moon orbit:", completed_moon_orbit)
             print("Completed free return trajectory:", free_return_trajectory)
+            print("Time to complete trajectory:", finish_time)
             print("Distance from earth protected zone:", constraints[0])
-            print("Distance from earth max orbit:", constraints[1])
-            print("Distance from moon protected zone:", constraints[2])
-            print("Distance from moon max orbit:", constraints[3])
+            print("Distance from moon protected zone:", constraints[1])
             print("Total Delta-v used:", self.total_delta_v_constraint())
             print("Penalty:", penalty)
-        return penalty
+        return penalty, valid_trajectory
     
     def add_burn_to_trajectory(self, delta_v_amount, time, rtol, atol):
         """Apply a delta-v burn to the trajectory.
@@ -286,7 +294,12 @@ class Problem:
             effective_burn_time,
             time_idx
         ))
-        
+    
+    def clear_control_sequence(self):
+        """Clear the control sequence."""
+        self.control_sequence = []
+        self.trajectory = None
+        self.t = None
 
     
     def total_delta_v_constraint(self):
@@ -314,9 +327,7 @@ class Problem:
             min_dist = np.min(dists)
             # Enforce a minimum radius from each object
             dist_error = obj.protected_zone - min_dist
-            max_dist_error = -1 * (obj.max_orbit - min_dist)
             dist_errors.append(dist_error)
-            dist_errors.append(max_dist_error)
         return np.array(dist_errors)
     
     
