@@ -22,7 +22,7 @@ def create_bodies():
     earth_protected_zone = 1 * earth_radius
     moon_protected_zone = 2 * moon_radius
     earth_max_orbit = 4 * earth_radius
-    moon_max_orbit = 4 * moon_radius
+    moon_max_orbit = 10 * moon_radius
 
     earth = Object("Earth", np.array([0.0, 0.0]), earth_radius, G, 100, 
                   "planet", "blue", [0, 0], False, earth_max_orbit, earth_protected_zone)
@@ -75,8 +75,8 @@ def plot_combined_trajectory(phases):
                                 color=obj.color, fill=False, linestyle='--', 
                                 alpha=0.4)
                 plt.gca().add_patch(zone)
-            if obj.ideal_max_orbit:
-                zone = plt.Circle(obj.position, obj.ideal_max_orbit, 
+            if obj.max_orbit:
+                zone = plt.Circle(obj.position, obj.max_orbit, 
                                 color=obj.color, fill=False, linestyle='--', 
                                 alpha=0.4)
                 plt.gca().add_patch(zone)
@@ -150,6 +150,11 @@ def apollo_11_mission(earth, moon):
     apollo_11.add_burn_to_trajectory(tli_delta_v, tli_time, rtol_sim, atol_sim)
     apollo_11.simulate_trajectory(rtol_sim, atol_sim)
 
+    # Evaluate constraints and print them
+    verbose = True
+    constraints = apollo_11.lunar_insertion_evaluate(verbose)
+
+
     """# 2. Mid-course correction burn (if needed)
     mcc_delta_v = 0.1  # km/s
     mcc_time = 30.0   # minutes after launch
@@ -165,11 +170,6 @@ def apollo_11_mission(earth, moon):
     initial_control = apollo_11.control_sequence
     initial_problem = apollo_11
     plot_combined_trajectory([(initial_trajectory, initial_control, initial_problem)])
-    
-    # Evaluate constraints
-    constraints = initial_problem.lunar_insertion_evaluate(tli_delta_v, tli_time)
-    print("Constraints:", constraints)
-    print("Total delta-v:", initial_problem.total_delta_v_constraint())
 
 def main():
     """Main function to run the simulation."""

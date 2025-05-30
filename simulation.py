@@ -38,8 +38,8 @@ class Problem:
         Args:
             initial_conditions (np.ndarray): Initial state vector
             objects (list[Object]): List of celestial objects
-            t_span (tuple): Time span of simulation
-            num_steps (int): Number of timesteps in simulation
+            mission_duration (int): Duration of mission
+            num_steps_per_timestep (int): Number of timesteps per timestep
         """
         self.initial_conditions = initial_conditions
         self.objects = objects
@@ -157,12 +157,11 @@ class Problem:
         self.t = np.concatenate(all_times)
 
 
-    def lunar_insertion_evaluate(self, delta_v_amount, time):
+    def lunar_insertion_evaluate(self,verbose):
         """Evaluate the lunar insertion constraint.
         
         Args:
-            delta_v_amount (float): Amount of delta-v
-            time (float): Time
+            verbose (bool): Whether to print verbose output
         """
 
         # Evaluate the constraints
@@ -174,17 +173,55 @@ class Problem:
         # This will control the sign of our constraint variable
         # First find the closest approach to the moon
         moon = self.objects[1]
-        moon_distances = np.linalg.norm(self.trajectory[:, :2] - moon.position, axis=1)
-        earth_distances = np.linalg.norm(self.trajectory[:, :2] - self.earth_pos, axis=1)
-        # We need to make sure that this changes sign exactly twice
+        moon_x_displacement = self.trajectory[:, 0] - moon.position[0]
+        moon_y_displacement = self.trajectory[:, 1] - moon.position[1]
+        completed_moon_orbit = False
+        free_return_trajectory = False
 
-        completed_moon_orbit = not np.where(np.diff(np.signbit(moon_distances)))[0] == 2
-        # This one I think this is 3 because in order to gaurantee the free return trajectory
-        # 1. It needs to leave the earth
-        # 2. It comes back to the earth
-        # 3. It does an orbit around the earth
-        completed_earth_orbit = not np.where(np.diff(np.signbit(earth_distances)))[0] == 3
+        # Check if the trajectory crosses the moon's x-axis twice
+        first_cross_index = None
+        second_cross_index = None
+        last_sign = moon_x_displacement[0] > 0
+        for i in range(len(moon_x_displacement)):
+            if moon_x_displacement[i] > 0 != last_sign:
+                if first_cross_index is None:
+                    first_cross_index = i
+                else:
+                    second_cross_index = i
+                    break
+            last_sign = moon_x_displacement[i] > 0
+        
+        # Check if at those two points the y displacement is on opposite sides of the moon
+        if first_cross_index is not None and second_cross_index is not None:
+            first_cross_y = moon_y_displacement[first_cross_index]
+            second_cross_y = moon_y_displacement[second_cross_index]
+            completed_moon_orbit = ((first_cross_y > 0 and second_cross_y > 0)
+                                    or (first_cross_y < 0 and second_cross_y < 0))
 
+        # Then, if we did make it around the moon, check if we complete an orbit around the earth afterwards
+        if completed_moon_orbit:
+            earth = self.objects[0]
+            earth_x_displacement = self.trajectory[:, 0] - earth.position[0]
+            earth_y_displacement = self.trajectory[:, 1] - earth.position[1]
+            earth_x_displacement = earth_x_displacement[second_cross_index:]
+            earth_y_displacement = earth_y_displacement[second_cross_index:]
+            last_sign = earth_x_displacement[0] > 0
+            earth_first_cross_index = None
+            earth_second_cross_index = None
+            for i in range(len(earth_x_displacement)):
+                if earth_x_displacement[i] > 0 != last_sign:
+                    if earth_first_cross_index is None:
+                        earth_first_cross_index = i
+                    else:
+                        earth_second_cross_index = i
+                        break
+                last_sign = earth_x_displacement[i] > 0
+            
+            if earth_first_cross_index is not None and earth_second_cross_index is not None:
+                earth_first_cross_y = earth_y_displacement[earth_first_cross_index]
+                earth_second_cross_y = earth_y_displacement[earth_second_cross_index]
+                free_return_trajectory = ((earth_first_cross_y > 0 and earth_second_cross_y > 0)
+                                           or (earth_first_cross_y < 0 and earth_second_cross_y < 0))
 
         # Time constraint for completing the whole trajectory should also be captured by these constraints
         
@@ -197,7 +234,7 @@ class Problem:
         penalty = 0
         if completed_moon_orbit:
             penalty += 1e6
-        if completed_earth_orbit:
+        if free_return_trajectory:
             penalty += 1e6
 
         #Variable constraint penalties
@@ -208,8 +245,15 @@ class Problem:
         delta_v_penalty = 10
         penalty += delta_v_penalty * self.total_delta_v_constraint()
 
-
-        print(completed_earth_orbit, completed_moon_orbit, constraints, self.total_delta_v_constraint())
+        if verbose:
+            print("Completed moon orbit:", completed_moon_orbit)
+            print("Completed free return trajectory:", free_return_trajectory)
+            print("Distance from earth protected zone:", constraints[0])
+            print("Distance from earth max orbit:", constraints[1])
+            print("Distance from moon protected zone:", constraints[2])
+            print("Distance from moon max orbit:", constraints[3])
+            print("Total Delta-v used:", self.total_delta_v_constraint())
+            print("Penalty:", penalty)
         return penalty
     
     def add_burn_to_trajectory(self, delta_v_amount, time, rtol, atol):
@@ -270,7 +314,7 @@ class Problem:
             min_dist = np.min(dists)
             # Enforce a minimum radius from each object
             dist_error = obj.protected_zone - min_dist
-            max_dist_error = -1 * (obj.ideal_max_orbit - min_dist)
+            max_dist_error = -1 * (obj.max_orbit - min_dist)
             dist_errors.append(dist_error)
             dist_errors.append(max_dist_error)
         return np.array(dist_errors)

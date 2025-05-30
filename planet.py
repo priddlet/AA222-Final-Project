@@ -18,7 +18,7 @@ class Object:
         last_t (float): Last time step
     """
     
-    def __init__(self, name, position, radius, G, mass, type, color, initial_velocity, dynamic, ideal_max_orbit, protected_zone):
+    def __init__(self, name, position, radius, G, mass, type, color, initial_velocity, dynamic, max_orbit, protected_zone):
         """Initialize a celestial object.
         
         Args:
@@ -45,7 +45,7 @@ class Object:
         self.trajectory = self.position
         self.dynamic = dynamic
         self.last_t = 0
-        self.ideal_max_orbit = ideal_max_orbit
+        self.max_orbit = max_orbit
 
     def get_gravitational_acceleration(self, x, y):
         """Calculate gravitational acceleration at point (x,y).
