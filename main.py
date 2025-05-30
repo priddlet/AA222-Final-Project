@@ -20,6 +20,42 @@ T_UNIT = 2 * np.pi     # rad/year
 
 G = 1
 
+# This is just an arbitrary sample problem
+# We'll do the apollo 11 mission
+
+# Mission:
+# 1. Transition from LEO to lunar orbit
+# 2. Orbit around the moon for a lil bit...
+# 3. Yeet the astronauts back to earth
+# 4. Transition to re-entry orbit
+# Objectives:
+# 1. Minimize the delta-v
+
+# Possible approach:
+
+# Split into smaller sub-problems
+# We can make these problems constraints of the overall orbit trajectory
+# 1. Transition from LEO to lunar orbit
+# 2. Orbit around the moon for a lil bit...
+# 3. Yeet the astronauts back to earth
+# 4. Transition to re-entry orbit
+# 5. Meet the re-entry orbit constraints
+
+# And then I'm thinking we do a genetic algorithm to optimize the control sequence
+# Maybe organize this by time-step, because I figure we'll just have delta-v in the tangentional direction
+# And we'll have a fixed amount of delta-v total for the mission
+
+# We'll manually find a basic control sequence that satisfies the constraints
+# Because otherwise it becomes more of a reinforcement learning problem thing than an optimization problem
+
+# So the evaluating constraints are:
+# 1. The initial conditions are the initial conditions of the LEO
+
+
+
+# We'll define this as starting in orbit around the earth
+def apollo_11_mission():
+
 def main():
     # Initialize the problem
     t_span = (0, 20)
