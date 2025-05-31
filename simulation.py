@@ -264,6 +264,32 @@ class Problem:
             print("Penalty:", penalty)
         return penalty, valid_trajectory
     
+    def find_moon_orbit_delta_v(self):
+        """Find the delta-v required to transition to a circular moon orbit."""
+        # We need to find the point in the trajectory where the velocity is tangential to the moon
+        # We know that is they are tangential, then the dot product of the velocity and the displacement vector is 0
+        moon = self.objects[1]
+        moon_x_displacement = self.trajectory[:, 0] - moon.position[0]
+        moon_y_displacement = self.trajectory[:, 1] - moon.position[1]
+        moon_orbit_velocity = self.trajectory[:, 2:4]
+        
+        # Find the point in the trajectory where the velocity is tangential to the moon
+        tangent_point = None
+        for i in range(len(moon_x_displacement)):
+            unit_velocity = moon_orbit_velocity[i] / np.linalg.norm(moon_orbit_velocity[i])
+            displacement = np.array([moon_x_displacement[i], moon_y_displacement[i]])
+            if abs(np.dot(unit_velocity, displacement)) < 1e-6:
+                tangent_point = self.trajectory[i]
+                break
+        if tangent_point is None:
+            raise ValueError("No tangent point found")
+        
+        # Calculate the delta_v required for a circular orbit around the moon
+        moon_orbit_radius = np.linalg.norm(tangent_point[:2] - moon.position)
+        moon_orbit_velocity = np.sqrt(moon.mu / moon_orbit_radius)
+        delta_v_required = moon_orbit_velocity - np.linalg.norm(tangent_point[2:4])
+        return tangent_point, delta_v_required
+    
     def add_burn_to_trajectory(self, delta_v_amount, time, rtol, atol):
         """Apply a delta-v burn to the trajectory.
         
