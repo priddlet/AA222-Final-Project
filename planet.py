@@ -47,6 +47,7 @@ class Object:
         self.dynamic = dynamic
         self.last_t = 0
         self.max_orbit = max_orbit
+        self.mu = G * self.mass
 
     def get_gravitational_acceleration(self, x, y):
         """Calculate gravitational acceleration at point (x,y).

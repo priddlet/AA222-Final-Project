@@ -240,7 +240,8 @@ class Problem:
 
         # And then we'll add the total delta-v which is our objective function
         delta_v_penalty = 100
-        penalty += delta_v_penalty * self.total_delta_v_constraint()
+        loc, moon_orbit_delta_v = self.find_moon_orbit_delta_v()
+        penalty += delta_v_penalty * (self.total_delta_v_constraint() + moon_orbit_delta_v)
 
         # Add the time penalty
         if free_return_trajectory:
@@ -290,6 +291,25 @@ class Problem:
         delta_v_required = moon_orbit_velocity - np.linalg.norm(tangent_point[2:4])
         return tangent_point, delta_v_required
     
+    
+    def planetary_orbit_constraint(self):
+        """Calculate planetary orbit constraint violations.
+        
+        Returns:
+            np.ndarray: Constraint violations for each object
+        """
+        dist_errors = []
+        # Calculate the minimum distance to each object
+        for obj in self.objects:
+            dists = np.linalg.norm(self.trajectory[:, :2] - obj.position, axis=1)
+            min_dist = np.min(dists)
+            # Enforce a minimum radius from each object
+            dist_error = obj.protected_zone - min_dist
+            max_dist_error = -1 * (obj.max_orbit - min_dist)
+            dist_errors.append(dist_error)
+            dist_errors.append(max_dist_error)
+        return np.array(dist_errors)
+    
     def add_burn_to_trajectory(self, delta_v_amount, time, rtol, atol):
         """Apply a delta-v burn to the trajectory.
         
@@ -320,7 +340,75 @@ class Problem:
             effective_burn_time,
             time_idx
         ))
-    
+
+    def earth_return_evaluate(self, verbose):
+        """Evaluate the earth return constraint.
+        
+        Args:
+            verbose (bool): Whether to print verbose output
+        """
+        # Make sure we cross over the earth's x-axis twice
+        earth = self.objects[0]
+        earth_x_displacement = self.trajectory[:, 0] - earth.position[0]
+        earth_y_displacement = self.trajectory[:, 1] - earth.position[1]
+        earth_first_cross_index = None
+        earth_second_cross_index = None
+        last_sign = earth_x_displacement[0] > 0
+        for i in range(len(earth_x_displacement)):
+            if earth_x_displacement[i] > 0 != last_sign:
+                if earth_first_cross_index is None:
+                    earth_first_cross_index = i
+                else:
+                    earth_second_cross_index = i
+                    break
+            last_sign = earth_x_displacement[i] > 0
+        
+        if earth_first_cross_index is not None and earth_second_cross_index is not None:
+            earth_first_cross_y = earth_y_displacement[earth_first_cross_index]
+            earth_second_cross_y = earth_y_displacement[earth_second_cross_index]
+            earth_return_trajectory = ((earth_first_cross_y > 0 and earth_second_cross_y > 0)
+                                           or (earth_first_cross_y < 0 and earth_second_cross_y < 0))
+        
+        # Then we want to find the closest point to our end conditions
+        # First find the closest point to LEO
+        leo_radius = self.leo_radius
+        x_displacement = self.trajectory[:, 0] - earth.position[0]
+        y_displacement = self.trajectory[:, 1] - earth.position[1]
+        distance = np.sqrt(x_displacement**2 + y_displacement**2)
+        leo_index = np.argmin(distance - leo_radius)
+
+        # Then at that point we'll evaluate our end conditions
+        r_error, delta_v_error = self.terminal_error(self.trajectory[leo_index])
+        
+        # We also want to know the time it takes to complete the trajectory
+        finish_time = self.t_eval[leo_index]
+
+        # Penalty function
+        penalty = 0
+
+        # Fixed constraint penalties
+        penalty += 1e6 * earth_return_trajectory
+
+        # Then we have our variable constraint penalties
+        penalty += 50 * r_error
+
+        # Then we'll add the total delta-v which is our objective function and the time penalty
+        time_penalty = 1
+        penalty += time_penalty * finish_time
+
+        delta_v_penalty = 100
+        penalty += delta_v_penalty * (delta_v_error + self.total_delta_v_constraint())
+
+
+        if verbose:
+            print("Earth return trajectory:", earth_return_trajectory)
+            print("Time to complete trajectory:", finish_time)
+            print("Total Delta-v used:", self.total_delta_v_constraint())
+            print("Penalty:", penalty)
+        return penalty, earth_return_trajectory
+        
+
+        
     def clear_control_sequence(self):
         """Clear the control sequence."""
         self.control_sequence = []
@@ -340,30 +428,13 @@ class Problem:
         return total_delta_v
     
     
-    def planetary_orbit_constraint(self):
-        """Calculate planetary orbit constraint violations.
-        
-        Returns:
-            np.ndarray: Constraint violations for each object
-        """
-        dist_errors = []
-        # Calculate the minimum distance to each object
-        for obj in self.objects:
-            dists = np.linalg.norm(self.trajectory[:, :2] - obj.position, axis=1)
-            min_dist = np.min(dists)
-            # Enforce a minimum radius from each object
-            dist_error = obj.protected_zone - min_dist
-            dist_errors.append(dist_error)
-        return np.array(dist_errors)
-    
-    
-    def reentry_angle_constraint(self):
+    def reentry_angle_error(self, final_state):
         """Calculate reentry angle constraint violation.
         
         Returns:
             np.ndarray: Constraint violation
         """
-        x, y, vx, vy = self.trajectory[-1]
+        x, y, vx, vy = final_state
         earth = self.objects[0]
         r = np.sqrt((x - earth.position[0])**2 + (y - earth.position[1])**2)
         v = np.array([vx, vy])
@@ -376,15 +447,15 @@ class Problem:
         # Calculate the error in angle
         angle_error = abs(angle_deg - 90 - self.target_angle) - self.reentry_angle_tolerance
 
-        return np.array([angle_error])  # Constraint is positive when outside of tolerance
+        return angle_error  # Constraint is positive when outside of tolerance
     
-    def terminal_constraint(self):
+    def terminal_error(self, final_state):
         """Calculate terminal constraint violations.
         
         Returns:
             np.ndarray: Constraint violations [distance error, speed error]
         """
-        x, y, vx, vy = self.trajectory[-1]
+        x, y, vx, vy = final_state
         earth = self.objects[0]
         # Calculate the distance to the earth
         r = np.sqrt((x - earth.position[0])**2 + (y - earth.position[1])**2)
@@ -394,7 +465,7 @@ class Problem:
         r_error = r - self.leo_radius
         v_error = v_mag - self.max_terminal_speed
 
-        return np.array([r_error, v_error])
+        return r_error, v_error
     
     def evaluate_constraints(self):
         """Evaluate all constraints.
