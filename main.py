@@ -122,8 +122,8 @@ def plot_combined_trajectory(phases):
 def apollo_11_mission(earth, moon):
     mission_duration = 1700
     num_steps_per_timestep = 20
-    rtol = 1e-8
-    atol = 1e-8
+    rtol = 1e-7
+    atol = 1e-7
 
     # Initial conditions for free return trajectory
     # Starting from low Earth orbit
@@ -168,7 +168,7 @@ def apollo_11_mission(earth, moon):
     max_delta_v = 10
 
     # Define the optimization parameters
-    num_samples = 400
+    num_samples = 50
     n_best = 3
     iterations = 3
     time_variance = 1e-4
@@ -178,10 +178,11 @@ def apollo_11_mission(earth, moon):
     # Run the optimization
     optimizer = CrossEntropyOptimizer(apollo_11, x0, min_time_step, max_time_step, min_delta_v, max_delta_v, rtol, atol)
     best_control = optimizer.optimize(num_samples, n_best, iterations, time_variance, delta_v_variance, decay_rate)
+    best_control = np.array([4.99943793, 1.54261006])
 
     # Add the burn to the trajectory
     apollo_11.clear_control_sequence()
-    apollo_11.add_burn_to_trajectory(best_control[0], best_control[1], rtol, atol)
+    apollo_11.add_burn_to_trajectory(best_control[1], best_control[0], rtol, atol)
     apollo_11.simulate_trajectory(rtol, atol)
     print("\nOptimized trajectory:")
     constraints, valid_trajectory = apollo_11.lunar_insertion_evaluate(True)

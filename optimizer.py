@@ -199,8 +199,8 @@ class CrossEntropyOptimizer:
             scores = []
             valid_samples = []
             
-            for sample in samples:
-                print(f"Evaluating sample: time={sample[0]:.4f}, delta_v={sample[1]:.4f}")
+            for n, sample in enumerate(samples):
+                print(f"Evaluating sample {n}: time={sample[0]:.4f}, delta_v={sample[1]:.4f}")
                 
                 # Reset simulation state and add new burn
                 self.problem.clear_control_sequence()
