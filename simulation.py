@@ -119,17 +119,18 @@ class Problem:
         # Simulate between each burn
         for burn in self.control_sequence:
             # Simulate up to the burn time
-            t_span = (self.t_eval[current_time_index], burn.time)
-            t_eval= self.t_eval[current_time_index:burn.time_index]
-            
-            # Simulate without control
-            sol = solve_ivp(self.pr3bp_dynamics, t_span, current_state,
-                            t_eval=t_eval, method='RK45', rtol=rtol_sim, atol=atol_sim)
-            
-            # Store trajectory up to burn
-            all_trajectories.append(sol.y.T)
+            t_span = (self.t_eval[current_time_index], self.t_span[1])
+            t_eval = self.t_eval[current_time_index:]
+
+            sol= solve_ivp(self.pr3bp_dynamics, t_span, current_state,
+                                t_eval=t_eval, method='RK45', rtol=rtol_sim, atol=atol_sim)
+
+            if not sol.success:
+                raise RuntimeError(f"Trajectory integration failed: {sol.message}")
+
+            all_trajectories.append(np.transpose(sol.y))
             all_times.append(sol.t)
-            
+                        
             # Apply burn
             current_state = sol.y.T[-1].copy()
             current_state[2:4] += burn.delta_v  # Add delta-v to velocity
@@ -145,7 +146,7 @@ class Problem:
                        t_eval=t_eval, method='RK45', rtol=1e-8, atol=1e-10)
         
         # Store final segment
-        all_trajectories.append(sol.y.T)
+        all_trajectories.append(np.transpose(sol.y))
         all_times.append(sol.t)
         
         # Combine all trajectories

@@ -5,7 +5,8 @@ from simulation import Problem
 from planet import Object
 from optimizer import GeneticOptimizer  
 import matplotlib.pyplot as plt
-from optimizer import CrossEntropyOptimizer
+#from optimizer import CrossEntropyOptimizer
+from hybrid import HybridOptimizer
 
 # Normalized gravitational constant
 G = 1
