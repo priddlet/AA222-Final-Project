@@ -160,6 +160,7 @@ def apollo_11_mission(earth, moon):
     initial_control = apollo_11.control_sequence
 
     # Now we're going to optimize the first part of the trajectory
+    plot_combined_trajectory([(initial_trajectory, initial_control, apollo_11)])
 
     # Define the optimizer parameters
     x0 = np.array([tli_time, tli_delta_v])
@@ -187,6 +188,7 @@ def apollo_11_mission(earth, moon):
     apollo_11.simulate_trajectory(rtol, atol)
     print("\nOptimized trajectory:")
     constraints, valid_trajectory = apollo_11.lunar_insertion_evaluate(True)
+
 
     # 2. Transition to a circular moon orbit
     tangent_point, moon_orbit_delta_v = apollo_11.find_moon_orbit_delta_v()

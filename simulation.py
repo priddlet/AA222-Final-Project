@@ -119,8 +119,8 @@ class Problem:
         # Simulate between each burn
         for burn in self.control_sequence:
             # Simulate up to the burn time
-            t_span = (self.t_eval[current_time_index], self.t_span[1])
-            t_eval = self.t_eval[current_time_index:]
+            t_span = (self.t_eval[current_time_index], burn.time)
+            t_eval = self.t_eval[current_time_index:burn.time_index]
 
             sol= solve_ivp(self.pr3bp_dynamics, t_span, current_state,
                                 t_eval=t_eval, method='RK45', rtol=rtol_sim, atol=atol_sim)
@@ -143,7 +143,7 @@ class Problem:
         t_span = (self.t_eval[current_time_index], self.t_span[1])
         t_eval = self.t_eval[current_time_index:]
         sol = solve_ivp(self.pr3bp_dynamics, t_span, current_state,
-                       t_eval=t_eval, method='RK45', rtol=1e-8, atol=1e-10)
+                       t_eval=t_eval, method='RK45', rtol=rtol_sim, atol=atol_sim)
         
         # Store final segment
         all_trajectories.append(np.transpose(sol.y))
