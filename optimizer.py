@@ -3,6 +3,7 @@
 import numpy as np
 from simulation import Problem
 import random
+from scipy.optimize import minimize
 
 # Default optimization parameters
 POP_SIZE = 30
@@ -170,14 +171,30 @@ class CrossEntropyOptimizer:
             print(f"Iteration {i}: Current best score = {self.best:.4f}")
 
         if use_local_refinement:
-            print("Starting local refinement (L-BFGS-B)...")
+            print("Starting local refinement...")
             bounds = [(self.min_time_step, self.max_time_step), (self.min_delta_v, self.max_delta_v)]
-            res = np.minimize(self.evaluate_objective, self.x0, bounds=bounds, method='L-BFGS-B')
-
-            if res.success and res.fun < self.best:
-                self.best = res.fun
-                self.x0 = res.x
-                print(f"✓ Local refinement improved score to {self.best:.4f} with parameters {self.x0}")
+            
+            # First stage: Nelder-Mead (more robust but slower)
+            print("Stage 1: Nelder-Mead optimization...")
+            res_nm = minimize(self.evaluate_objective, self.x0, 
+                            method='Nelder-Mead',
+                            options={'maxiter': 100, 'xatol': 1e-4, 'fatol': 1e-4})
+            
+            if res_nm.success and res_nm.fun < self.best:
+                self.best = res_nm.fun
+                self.x0 = res_nm.x
+                print(f"✓ Nelder-Mead improved score to {self.best:.4f}")
+                
+                # Second stage: BFGS (faster but needs good initial guess)
+                print("Stage 2: BFGS refinement...")
+                res_bfgs = minimize(self.evaluate_objective, self.x0,
+                                  method='BFGS',
+                                  options={'maxiter': 50})
+                
+                if res_bfgs.success and res_bfgs.fun < self.best:
+                    self.best = res_bfgs.fun
+                    self.x0 = res_bfgs.x
+                    print(f"✓ BFGS further improved score to {self.best:.4f}")
             else:
                 print("✗ Local refinement did not improve the score")
 

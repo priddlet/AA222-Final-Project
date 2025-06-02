@@ -136,7 +136,6 @@ def plot_pt(apollo11, burn1_unoptimized, burn1_optimized):
     apollo11.add_burn_to_trajectory(burn1_unoptimized[1], burn1_unoptimized[0], rtol, atol)
     apollo11.simulate_trajectory(rtol, atol)
     plt.plot(apollo11.trajectory[:, 0], apollo11.trajectory[:, 1], 'r--', label='Unoptimized', alpha=0.7)
-    results = apollo11.evaluate_trajectory(rtol, atol)
 
 
     # Plot optimized trajectory
@@ -144,7 +143,6 @@ def plot_pt(apollo11, burn1_unoptimized, burn1_optimized):
     apollo11.add_burn_to_trajectory(burn1_optimized[1], burn1_optimized[0], rtol, atol)
     apollo11.simulate_trajectory(rtol, atol)
     plt.plot(apollo11.trajectory[:, 0], apollo11.trajectory[:, 1], 'g-', label='Optimized', alpha=0.7)
-    results = apollo11.evaluate_trajectory(rtol, atol)
 
     # Set equal aspect ratio and limits
     plt.axis('equal')
