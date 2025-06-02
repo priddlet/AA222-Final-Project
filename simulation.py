@@ -104,6 +104,9 @@ class Problem:
 
         Updates self.trajectory and self.t with the simulation results.
         """
+        import numpy as np
+        from scipy.integrate import solve_ivp
+
         all_trajectories = []
         all_times = []
 
@@ -118,52 +121,76 @@ class Problem:
         current_state = np.concatenate([initial_position, initial_velocity])
         current_time_index = 0
 
+        if not np.all(np.isfinite(current_state)):
+            raise ValueError(f"[ERROR] Initial state contains NaNs or infs: {current_state}")
+
         if len(self.control_sequence) > 0:
             for burn in self.control_sequence:
                 if burn.time_index <= current_time_index:
                     continue  # Skip degenerate burns
-                t_span = (self.t_eval[current_time_index] / time_normalization_factor,
-                          burn.time / time_normalization_factor)
+
+                t0 = self.t_eval[current_time_index] / time_normalization_factor
+                t1 = burn.time / time_normalization_factor
+                if t1 <= t0:
+                    print(f"[DEBUG] Skipping burn segment from t={t0:.3f} to t={t1:.3f} (non-positive duration)")
+                    continue
+
+                t_span = (t0, t1)
                 t_eval = self.t_eval[current_time_index:burn.time_index] / time_normalization_factor
 
-                sol = solve_ivp(self.cr3bp_dynamics, t_span, current_state,
+                print(f"[DEBUG] Burn segment from t={t_span[0]:.3f} to t={t_span[1]:.3f}")
+                print(f"[DEBUG] Current state before burn: {current_state}")
+
+                result = solve_ivp(self.cr3bp_dynamics, t_span, current_state,
                                 t_eval=t_eval, method='RK45', rtol=rtol, atol=atol)
 
-                if not sol.success:
-                    raise RuntimeError(f"Trajectory integration failed: {sol.message}")
-                if sol.y.shape[1] == 0:
-                    raise RuntimeError("Integration returned zero points before burn.")
+                if not result.success:
+                    raise RuntimeError(f"Trajectory integration failed: {result.message}")
+                if not hasattr(result, "y") or len(np.asarray(result.y).shape) < 2 or result.y.shape[1] == 0:
+                    raise RuntimeError("Integration returned invalid or empty result before burn.")
 
-                all_trajectories.append(np.transpose(sol.y))
-                all_times.append(sol.t)
+                all_trajectories.append(result.y.T)
+                all_times.append(result.t)
 
-                sol_y = np.asarray(sol.y)
-                current_state = sol_y.T[-1].copy()
+                current_state = result.y[:, -1].copy()
                 current_state[2:4] += burn.delta_v / velocity_normalization
                 current_time_index = burn.time_index
-
                 burn.set_coordinates(current_state[:2] * length_normalization)
 
-        t_span = (self.t_eval[current_time_index] / time_normalization_factor,
-                  self.t_eval[-1] / time_normalization_factor)
-        t_eval = self.t_eval[current_time_index:] / time_normalization_factor
+        # Final segment after last burn
+        if current_time_index >= len(self.t_eval) - 1:
+            print("[DEBUG] No final propagation needed — already at end of t_eval.")
+            return
 
-        sol = solve_ivp(self.cr3bp_dynamics, t_span, current_state,
-                        t_eval=t_eval, method='RK45', rtol=rtol, atol=atol)
+        t0_final = self.t_eval[current_time_index] / time_normalization_factor
+        t1_final = self.t_eval[-1] / time_normalization_factor
+        if t1_final <= t0_final:
+            print(f"[DEBUG] Skipping final propagation from t={t0_final:.3f} to t={t1_final:.3f} (non-positive duration)")
+            return
 
-        if not sol.success:
-            raise RuntimeError(f"Final trajectory integration failed: {sol.message}")
-        if sol.y.shape[1] == 0:
-            raise RuntimeError("Final integration returned zero points.")
+        print(f"[DEBUG] Final segment from t={t0_final:.3f} to {t1_final:.3f}")
+        print(f"[DEBUG] Final state before integration: {current_state}")
 
-        all_trajectories.append(np.transpose(sol.y))
-        all_times.append(sol.t)
+        t_span_final = (t0_final, t1_final)
+        t_eval_final = self.t_eval[current_time_index:] / time_normalization_factor
+
+        result_final = solve_ivp(self.cr3bp_dynamics, t_span_final, current_state,
+                                t_eval=t_eval_final, method='RK45', rtol=rtol, atol=atol)
+
+        if not result_final.success:
+            raise RuntimeError(f"Final trajectory integration failed: {result_final.message}")
+        if not hasattr(result_final, "y") or len(np.asarray(result_final.y).shape) < 2 or result_final.y.shape[1] == 0:
+            raise RuntimeError("Final integration returned invalid or empty trajectory.")
+
+        all_trajectories.append(result_final.y.T)
+        all_times.append(result_final.t)
 
         trajectory_array = np.vstack(all_trajectories)
         trajectory_array[:, :2] *= length_normalization
         trajectory_array[:, 2:] *= velocity_normalization
         self.trajectory = trajectory_array
         self.t = np.concatenate(all_times) * time_normalization_factor
+
     
 
     def set_control_sequence(self, control_sequence):
@@ -333,9 +360,6 @@ class Problem:
         return penalty, valid_trajectory
     
     def find_moon_orbit_delta_v(self):
-        """Find the delta-v required to transition to a circular moon orbit."""
-        # We need to find the point in the trajectory where the velocity is tangential to the moon
-        # We know that is they are tangential, then the dot product of the velocity and the displacement vector is 0
         moon = self.objects[1]
         closest_approach_index = np.argmin(np.linalg.norm(self.trajectory[:, :2] - moon.position, axis=1))
         moon_x_displacement = self.trajectory[:, 0] - moon.position[0]
@@ -343,25 +367,34 @@ class Problem:
         moon_orbit_velocity = self.trajectory[:, 2:4]
         search_radius = 200
 
-        
-        # Find the point in the trajectory where the velocity is tangential to the moon
-        tangent_point = None
-        for i in range(-search_radius + closest_approach_index, search_radius + closest_approach_index):
-            unit_velocity = moon_orbit_velocity[i] / np.linalg.norm(moon_orbit_velocity[i])
-            displacement = np.array([moon_x_displacement[i], moon_y_displacement[i]])
-            unit_displacement = displacement / np.linalg.norm(displacement)
-            if abs(np.dot(unit_velocity, unit_displacement)) < 1e-4:
-                tangent_point = self.trajectory[i]
-                break
-        if tangent_point is None:
-            raise ValueError("No tangent point found")
-        
-        # Calculate the delta_v required for a circular orbit around the moon
+        min_dot = float("inf")
+        best_index = None
+
+        i_min = max(0, closest_approach_index - search_radius)
+        i_max = min(len(self.trajectory), closest_approach_index + search_radius)
+
+        for i in range(i_min, i_max):
+            vel = moon_orbit_velocity[i]
+            disp = np.array([moon_x_displacement[i], moon_y_displacement[i]])
+            if np.linalg.norm(vel) == 0 or np.linalg.norm(disp) == 0:
+                continue
+            unit_velocity = vel / np.linalg.norm(vel)
+            unit_displacement = disp / np.linalg.norm(disp)
+
+            dot = abs(np.dot(unit_velocity, unit_displacement))  # 0 = tangent
+            if dot < min_dot:
+                min_dot = dot
+                best_index = i
+
+        if best_index is None or min_dot > 0.3:  # Allow a loose threshold
+            raise ValueError(f"No tangent point found. Closest dot = {min_dot:.5f}")
+
+        tangent_point = self.trajectory[best_index]
         moon_orbit_radius = np.linalg.norm(tangent_point[:2] - moon.position)
-        moon_orbit_speed = np.sqrt(moon.mu / moon_orbit_radius)
+        moon_orbit_speed = np.sqrt(self.mu / moon_orbit_radius)
         delta_v_required = moon_orbit_speed - np.linalg.norm(tangent_point[2:4])
         return tangent_point, delta_v_required
-    
+        
     
     def planetary_orbit_constraint(self):
         """Calculate planetary orbit constraint violations.

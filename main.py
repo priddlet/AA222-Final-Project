@@ -54,10 +54,14 @@ def run_phase(name, initial_conditions, t_span, bodies, num_steps=1000):
     Returns:
         tuple: (trajectory, control_sequence, problem)
     """
+
+    rtol = 1e-7
+    atol = 1e-9
+
     problem = Problem(initial_conditions, bodies, t_span, num_steps=num_steps)
     optimizer = GeneticOptimizer(problem, t_n=num_steps)
     best_control = optimizer.optimize()
-    problem.simulate_trajectory()
+    problem.simulate_trajectory(rtol, atol)
     return problem.trajectory, problem.control_sequence, problem
 
 
@@ -326,11 +330,14 @@ def apollo_11_mission(earth, moon):
     moon_orbit_time = 2 * np.pi * r_moon**1.5 / np.sqrt(moon.G * moon.mass)
 
     # TODO: Find good initial conditions for the return burn AFTER optimizing the first part of the trajectory
-    return_burn_time = 2.0
-    return_burn_delta_v = 1.0
+    return_burn_time = moon_orbit_time * 1.1  # after 1 full orbit + buffer
+    v_circular = np.linalg.norm(x0[2:4])  # current moon orbit velocity
+    v_escape = np.sqrt(2 * moon.G * moon.mass / r_moon)
+    delta_v_guess = v_escape - v_circular  # or maybe just 0.7 to 1.2 km/s
+
     
     moon_orbit_duration = n_orbits * moon_orbit_time
-    apollo_11_pt2.add_burn_to_trajectory(return_burn_delta_v, moon_orbit_duration + return_burn_time, rtol, atol)
+    apollo_11_pt2.add_burn_to_trajectory(delta_v_guess, moon_orbit_duration + return_burn_time, rtol, atol)
     apollo_11_pt2.simulate_trajectory(rtol, atol)
     initial_trajectory_pt2 = apollo_11_pt2.trajectory
     initial_control_pt2 = apollo_11_pt2.control_sequence
@@ -343,7 +350,7 @@ def apollo_11_mission(earth, moon):
     print("Initial constraints:", earth_return_trajectory)
 
     # Define the optimizer parameters
-    x0 = np.array([return_burn_time, return_burn_delta_v])
+    x0 = np.array([return_burn_time, delta_v_guess])
 
     # Run the hybrid optimization
     optimizer = HybridOptimizer(apollo_11_pt2, use_gradient_refinement=True, stage1_method="pso", initial_conditions=x0)

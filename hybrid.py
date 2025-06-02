@@ -46,7 +46,7 @@ class CrossEntropyOptimizerWrapper:
 
 
 class ParticleSwarmOptimizerWrapper:
-    def __init__(self, problem, swarm_size=30, max_iter=10):
+    def __init__(self, problem, swarm_size=30, max_iter=3):
         self.problem = problem
         self.traj_problem = TrajectoryOptimizationProblem(problem)
         self.swarm_size = swarm_size
