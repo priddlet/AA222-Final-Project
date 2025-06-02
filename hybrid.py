@@ -46,7 +46,7 @@ class CrossEntropyOptimizerWrapper:
 
 
 class ParticleSwarmOptimizerWrapper:
-    def __init__(self, problem, swarm_size=30, max_iter=30):
+    def __init__(self, problem, swarm_size=30, max_iter=10):
         self.problem = problem
         self.traj_problem = TrajectoryOptimizationProblem(problem)
         self.swarm_size = swarm_size
@@ -57,12 +57,9 @@ class ParticleSwarmOptimizerWrapper:
         cognitive = 1.5
         social = 1.5
 
-        # Initialize positions as a 2D array of shape (swarm_size, 2)
         positions = np.random.uniform(-0.01, 0.01, (self.swarm_size, 2))
         velocities = np.zeros_like(positions)
         personal_best = positions.copy()
-        
-        # Evaluate each position (which is a 2D vector [time, delta_v])
         personal_best_scores = np.array([self.traj_problem.objective(p)[0] for p in positions])
         
         global_best_idx = np.argmin(personal_best_scores)
@@ -70,8 +67,8 @@ class ParticleSwarmOptimizerWrapper:
 
         for iter in range(self.max_iter):
             for i in range(self.swarm_size):
-                r1 = np.random.rand(2)  # Random vector of size 2
-                r2 = np.random.rand(2)  # Random vector of size 2
+                r1 = np.random.rand(2)
+                r2 = np.random.rand(2)
                 velocities[i] = (
                     inertia * velocities[i]
                     + cognitive * r1 * (personal_best[i] - positions[i])
@@ -103,13 +100,11 @@ class HybridOptimizer:
         if self.stage1_method == "ga":
             stage1 = GeneticOptimizer(self.problem)
             if self.initial_conditions is not None:
-                # Initialize population with the initial conditions
                 stage1.best_sequence = self.initial_conditions
             best_sequence = stage1.optimize()
         elif self.stage1_method == "pso":
             stage1 = ParticleSwarmOptimizerWrapper(self.problem)
             if self.initial_conditions is not None:
-                # Initialize swarm with the initial conditions
                 stage1.global_best = self.initial_conditions
             best_sequence = stage1.optimize(dim_shape=(2,))
         else:
@@ -130,7 +125,7 @@ class HybridOptimizer:
                 print("Gradient refinement failed:", e)
 
         self.problem.set_control_sequence(best_sequence)
-        self.problem.simulate_trajectory()
+        self.problem.simulate_trajectory(rtol=1e-7, atol=1e-9)
         return best_sequence
 
     def gradient_refine(self, initial_sequence):

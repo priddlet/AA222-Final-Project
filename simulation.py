@@ -99,69 +99,69 @@ class Problem:
         return np.array([vx, vy, ax, ay])
 
     
-    def simulate_trajectory(self, rtol_sim, atol_sim):
+    def simulate_trajectory(self, rtol, atol):
         """Simulate the trajectory of the system by handling each burn separately.
-        
+
         Updates self.trajectory and self.t with the simulation results.
         """
-        # Initialize trajectory storage
         all_trajectories = []
         all_times = []
 
-        # Initialize the normalization factor
         length_normalization = self.moon.position[0] - self.earth.position[0]
         time_normalization_factor = 383.0
         velocity_normalization = length_normalization / time_normalization_factor
         self.earth_pos_normalized = self.earth.position / length_normalization
         self.moon_pos_normalized = self.moon.position / length_normalization
-        
-        
-        # Start with initial conditions
-        # Convert the inital conditions to normalized units
+
         initial_position = self.initial_conditions[:2] / length_normalization
         initial_velocity = self.initial_conditions[2:4] / velocity_normalization
         current_state = np.concatenate([initial_position, initial_velocity])
         current_time_index = 0
-        
-        # Simulate between each burn
+
         if len(self.control_sequence) > 0:
             for burn in self.control_sequence:
-                # Simulate up to the burn time
-                t_span = (self.t_eval[current_time_index] / time_normalization_factor, burn.time / time_normalization_factor)
+                if burn.time_index <= current_time_index:
+                    continue  # Skip degenerate burns
+                t_span = (self.t_eval[current_time_index] / time_normalization_factor,
+                          burn.time / time_normalization_factor)
                 t_eval = self.t_eval[current_time_index:burn.time_index] / time_normalization_factor
 
-                sol= solve_ivp(self.cr3bp_dynamics, t_span, current_state,
-                                    t_eval=t_eval, method='RK45', rtol=rtol_sim, atol=atol_sim)
+                sol = solve_ivp(self.cr3bp_dynamics, t_span, current_state,
+                                t_eval=t_eval, method='RK45', rtol=rtol, atol=atol)
 
                 if not sol.success:
                     raise RuntimeError(f"Trajectory integration failed: {sol.message}")
+                if sol.y.shape[1] == 0:
+                    raise RuntimeError("Integration returned zero points before burn.")
 
                 all_trajectories.append(np.transpose(sol.y))
                 all_times.append(sol.t)
-                            
-                # Apply burn
-                current_state = sol.y.T[-1].copy()
-                current_state[2:4] += burn.delta_v / velocity_normalization # Add delta-v to velocity
+
+                sol_y = np.asarray(sol.y)
+                current_state = sol_y.T[-1].copy()
+                current_state[2:4] += burn.delta_v / velocity_normalization
                 current_time_index = burn.time_index
 
-                # Update the location of the burn
                 burn.set_coordinates(current_state[:2] * length_normalization)
-        
-        # Simulate final segment
-        t_span = (self.t_eval[current_time_index] / time_normalization_factor, self.t_eval[-1] / time_normalization_factor)
+
+        t_span = (self.t_eval[current_time_index] / time_normalization_factor,
+                  self.t_eval[-1] / time_normalization_factor)
         t_eval = self.t_eval[current_time_index:] / time_normalization_factor
+
         sol = solve_ivp(self.cr3bp_dynamics, t_span, current_state,
-                       t_eval=t_eval, method='RK45', rtol=rtol_sim, atol=atol_sim)
-        
-        # Store final segment
+                        t_eval=t_eval, method='RK45', rtol=rtol_sim, atol=atol_sim)
+
+        if not sol.success:
+            raise RuntimeError(f"Final trajectory integration failed: {sol.message}")
+        if sol.y.shape[1] == 0:
+            raise RuntimeError("Final integration returned zero points.")
+
         all_trajectories.append(np.transpose(sol.y))
         all_times.append(sol.t)
-        
-        # Combine all trajectories
-        # Combine all trajectories and normalize both position and velocities
+
         trajectory_array = np.vstack(all_trajectories)
-        trajectory_array[:, :2] *= length_normalization  # Position components
-        trajectory_array[:, 2:] *= velocity_normalization  # Velocity components
+        trajectory_array[:, :2] *= length_normalization
+        trajectory_array[:, 2:] *= velocity_normalization
         self.trajectory = trajectory_array
         self.t = np.concatenate(all_times) * time_normalization_factor
     
@@ -512,23 +512,23 @@ class Problem:
         return r_error, v_error
     
     def evaluate_constraints(self):
-        """Evaluate all constraints.
-        
-        Returns:
-            np.ndarray: Combined constraint violations
-        """
-        if self.trajectory is None or len(self.trajectory) == 0:
-            return np.ones(10) * 1e6  # heavy penalty
+            """Evaluate all constraints.
 
-        try:
-            reentry_angle_error = self.reentry_angle_constraint()
-            planetary_orbit_error = self.planetary_orbit_constraint()
-            terminal_error = self.terminal_constraint()
-        except Exception as e:
-            print("Constraint eval failed:", e)
-            return np.ones(10) * 1e6  # heavy penalty
+            Returns:
+                np.ndarray: Combined constraint violations
+            """
+            if self.trajectory is None or len(self.trajectory) == 0:
+                return np.ones(10) * 1e6  # heavy penalty
 
-        return np.concatenate([reentry_angle_error, planetary_orbit_error, terminal_error], axis=0)
+            try:
+                reentry_angle_error = np.array([self.reentry_angle_error(self.trajectory[-1])])
+                planetary_orbit_error = self.planetary_orbit_constraint()
+                terminal_error = self.terminal_error(self.trajectory[-1])
+            except Exception as e:
+                print("Constraint eval failed:", e)
+                return np.ones(10) * 1e6  # heavy penalty
+
+            return np.concatenate([reentry_angle_error, planetary_orbit_error, terminal_error], axis=0)
     
 
     def plot_trajectory(self):
