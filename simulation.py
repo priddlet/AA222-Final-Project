@@ -53,12 +53,14 @@ class Problem:
         self.t_eval = np.linspace(*self.t_span, self.num_steps)  # Uniform timesteps
 
         # Earth position in normalized units
-        self.earth_pos = np.array([0, 0])
-        self.leo_radius = 1  # 1 - self.mu
+        self.earth = self.objects[0]
+        self.moon = self.objects[1]
+        self.leo_radius = self.earth.radius + 0.2 
+        self.earth_pos_normalized = None
+        self.moon_pos_normalized = None
 
-        # Sun position in normalized units
-        self.sun_pos = np.array([5, 0])
-        self.sun_radius = 1
+        #self.mu = self.moon.mass / (self.earth.mass + self.moon.mass) # This is based on how the cr3bp is defined
+        self.mu = 1.21505856096e-2
 
         # Set the constraint constants
         self.target_angle = 6.5  # Acceptable corridor: ~6.5 degrees +- 1
@@ -78,30 +80,18 @@ class Problem:
             return self.delta_v / np.linalg.norm(self.delta_v)
         def get_magnitude(self):
             return np.linalg.norm(self.delta_v)
-
-    
-    def pr3bp_dynamics(self, t, state):
-        """Dynamics equations for the PR3BP.
         
-        Args:
-            t (float): Time (required by solve_ivp but not used)
-            state (np.ndarray): State vector [x, y, vx, vy]
-            
-        Returns:
-            np.ndarray: State derivatives [dx/dt, dy/dt, dvx/dt, dvy/dt]
-        """
+    def cr3bp_dynamics(self, t, state):
+        # Distance to the moon and earth
         x, y, vx, vy = state
-        a = np.zeros(2)
-        for obj in self.objects:
-            a += obj.get_gravitational_acceleration(x, y)
-        
-        # Propagate the orbits of the other objects
-        earth = self.objects[0]
-        for obj in self.objects[1:]:
-            obj.propagate_position(obj.get_gravitational_acceleration(earth.x, earth.y), t)
+        r1 = np.linalg.norm(np.array([x + self.mu, y])) 
+        r2 = np.linalg.norm(np.array([x - 1 + self.mu, y])) 
 
-        return np.array([vx, vy, a[0], a[1]])
-    
+        ax = (2 * vy) + x - (((1 - self.mu) * (x + self.mu)) / r1**3) - ((self.mu * (x - 1 + self.mu)) / r2**3)
+        ay = (-2 * vx) + y - (((1 - self.mu) * y) / r1**3) - ((self.mu * y) / r2**3)
+
+        return np.array([vx, vy, ax, ay])
+
     
     def simulate_trajectory(self, rtol_sim, atol_sim):
         """Simulate the trajectory of the system by handling each burn separately.
@@ -111,18 +101,33 @@ class Problem:
         # Initialize trajectory storage
         all_trajectories = []
         all_times = []
+
+        # Initialize the normalization factor
+        length_normalization = self.moon.position[0] - self.earth.position[0]
+        time_normalization_factor = 383.0
+        velocity_normalization = length_normalization / time_normalization_factor
+        self.earth_pos_normalized = self.earth.position / length_normalization
+        self.moon_pos_normalized = self.moon.position / length_normalization
+        
+
         
         # Start with initial conditions
-        current_state = self.initial_conditions
+        # Convert the inital conditions to normalized units
+        initial_position = self.initial_conditions[:2] / length_normalization
+        initial_velocity = self.initial_conditions[2:4] / velocity_normalization
+        current_state = np.concatenate([initial_position, initial_velocity])
         current_time_index = 0
+
+    
+
         
         # Simulate between each burn
         for burn in self.control_sequence:
             # Simulate up to the burn time
-            t_span = (self.t_eval[current_time_index], burn.time)
-            t_eval = self.t_eval[current_time_index:burn.time_index]
+            t_span = (self.t_eval[current_time_index] / time_normalization_factor, burn.time / time_normalization_factor)
+            t_eval = self.t_eval[current_time_index:burn.time_index] / time_normalization_factor
 
-            sol= solve_ivp(self.pr3bp_dynamics, t_span, current_state,
+            sol= solve_ivp(self.cr3bp_dynamics, t_span, current_state,
                                 t_eval=t_eval, method='RK45', rtol=rtol_sim, atol=atol_sim)
 
             if not sol.success:
@@ -133,16 +138,16 @@ class Problem:
                         
             # Apply burn
             current_state = sol.y.T[-1].copy()
-            current_state[2:4] += burn.delta_v  # Add delta-v to velocity
+            current_state[2:4] += burn.delta_v / velocity_normalization # Add delta-v to velocity
             current_time_index = burn.time_index
 
             # Update the location of the burn
-            burn.set_coordinates(current_state[:2])
+            burn.set_coordinates(current_state[:2] * length_normalization)
         
         # Simulate final segment
-        t_span = (self.t_eval[current_time_index], self.t_span[1])
-        t_eval = self.t_eval[current_time_index:]
-        sol = solve_ivp(self.pr3bp_dynamics, t_span, current_state,
+        t_span = (self.t_eval[current_time_index] / time_normalization_factor, self.t_eval[-1] / time_normalization_factor)
+        t_eval = self.t_eval[current_time_index:] / time_normalization_factor
+        sol = solve_ivp(self.cr3bp_dynamics, t_span, current_state,
                        t_eval=t_eval, method='RK45', rtol=rtol_sim, atol=atol_sim)
         
         # Store final segment
@@ -150,8 +155,12 @@ class Problem:
         all_times.append(sol.t)
         
         # Combine all trajectories
-        self.trajectory = np.vstack(all_trajectories)
-        self.t = np.concatenate(all_times)
+        # Combine all trajectories and normalize both position and velocities
+        trajectory_array = np.vstack(all_trajectories)
+        trajectory_array[:, :2] *= length_normalization  # Position components
+        trajectory_array[:, 2:] *= velocity_normalization  # Velocity components
+        self.trajectory = trajectory_array
+        self.t = np.concatenate(all_times) * time_normalization_factor
 
 
     def lunar_insertion_evaluate(self,verbose):

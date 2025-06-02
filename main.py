@@ -20,22 +20,22 @@ def create_bodies():
     """
     earth_radius = 6.371  # Earth radius in normalized units
     moon_radius = 1.737   # Moon radius in normalized units 
-    safe_gap = 384.4     # Average Earth-Moon distance in normalized units
+    earth_mass = 81.284
+    moon_mass = 1.23
+    semi_major_axis = 389.7     # Average Earth-Moon distance in normalized units
+    mu = 1.21505856096e-2
+    earth_pos = np.array([-mu * semi_major_axis, 0])
+    moon_pos = np.array([(1 - mu) * semi_major_axis, 0])
     earth_protected_zone = 1 * earth_radius
     moon_protected_zone = 2 * moon_radius
     earth_max_orbit = 4 * earth_radius
     moon_max_orbit = 10 * moon_radius
 
-    earth = Object("Earth", np.array([0.0, 0.0]), earth_radius, G, 100, 
+
+    earth = Object("Earth", earth_pos, earth_radius, G, earth_mass, 
                   "planet", "blue", [0, 0], False, earth_max_orbit, earth_protected_zone)
-    moon = Object("Moon", np.zeros(2), moon_radius, G, 20, 
-                 "satellite", "gray", [0, 0.2], False, moon_max_orbit, moon_protected_zone)
-
-
-    moon_distance = earth.protected_zone + moon.protected_zone + safe_gap
-
-    moon.position = np.array([moon_distance, 0.0])
-    moon.x, moon.y = moon.position
+    moon = Object("Moon", moon_pos, moon_radius, G, moon_mass, 
+                 "satellite", "gray", [0, 0], False, moon_max_orbit, moon_protected_zone)
 
     return earth, moon
 
@@ -120,11 +120,35 @@ def plot_combined_trajectory(phases):
     plt.legend()
     plt.show()
 
+def get_LEO_velocity(initial_x, initial_y, moon, earth):
+    """Get the velocity needed to be in a low earth orbit in the CR3BP.
+    
+    Args:
+        initial_x (float): x position
+        initial_y (float): y position
+        moon (Object): moon object  
+        earth (Object): earth object   
+    
+    Returns:
+        float: velocity
+    """
+    mu = moon.mass / (moon.mass + earth.mass)
+    length_normalization = moon.position[0] - earth.position[0]
+    time_normalization_factor = 383.0
+    velocity_normalization = length_normalization / time_normalization_factor
+    earth_pos_normalized = earth.position / length_normalization
+    x_normalized = initial_x / length_normalization
+    y_normalized = initial_y / length_normalization
+    r_earth_orbit = np.sqrt((x_normalized - earth_pos_normalized[0])**2 + (y_normalized - earth_pos_normalized[1])**2)
+    v_circular_inertial = np.sqrt((1 - mu) / r_earth_orbit)
+    v_rotating = v_circular_inertial - x_normalized
+    return v_rotating * velocity_normalization
+
 def apollo_11_mission(earth, moon):
-    mission_duration = 1700
+    mission_duration = 50
     num_steps_per_timestep = 20
     rtol = 1e-7
-    atol = 1e-7
+    atol = 1e-9
 
     # Initial conditions for free return trajectory
     # Starting from low Earth orbit
@@ -132,22 +156,23 @@ def apollo_11_mission(earth, moon):
     leo_altitude = 0.2  # km above Earth's surface (in normalized units)
     leo_radius = earth_radius + leo_altitude
 
-    # Solve for circular orbit velocity
-    circular_orbit_velocity = np.sqrt(G * earth.mass / leo_radius)
-    
+    # Calculate position relative to Earth's actual position
+    initial_x = earth.position[0] + leo_radius
+    initial_y = earth.position[1]
+
     # Initial position and velocity for circular orbit
     initial_conditions = np.array([
-        leo_radius,  # x position
-        0,              # y position
-        0,              # x velocity
-        circular_orbit_velocity            # y velocity (circular orbit velocity ~7.8 km/s)
+        initial_x,  # x position
+        initial_y,  # y position
+        0,         # x velocity
+        get_LEO_velocity(initial_x, initial_y, moon, earth) # y velocity
     ])
 
     apollo_11 = Problem(initial_conditions, [earth, moon], mission_duration, num_steps_per_timestep)
 
     # Define the three burns for the free return trajectory
     # 1. TLI (Trans-Lunar Injection) burn
-    tli_delta_v = 1.54 # km/s
+    tli_delta_v = 0#1.54 # km/s
     tli_time = 5    # minutes after launch
     apollo_11.add_burn_to_trajectory(tli_delta_v, tli_time, rtol, atol)
     apollo_11.simulate_trajectory(rtol, atol)

@@ -62,6 +62,7 @@ class Object:
         r = np.linalg.norm(self.position - np.array([x, y]))
         a = self.mass * (self.position - np.array([x, y])) / r**3
         return a
+        
     
     def propagate_position(self, a, cur_t):
         """Propagate object position using RK4 integration.
