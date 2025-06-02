@@ -40,6 +40,7 @@ def create_bodies():
 
     return earth, moon
 
+    
 
 def run_phase(name, initial_conditions, t_span, bodies, num_steps=1000):
     """Run a single mission phase.
@@ -194,52 +195,10 @@ def get_moon_orbit_velocity(initial_x, initial_y, moon, earth):
 
     return velocity_required
 
-def plot_mission_trajectory(initial_trajectory, initial_control, problem, color='cyan', alpha=1.0, label='Trajectory'):
-    """Plot the mission trajectory with a space-like visualization.
-    
-    Args:
-        initial_trajectory (np.ndarray): Initial trajectory data
-        initial_control (list): Initial control sequence
-        problem (Problem): Problem instance containing simulation data
-        color (str): Color for the trajectory
-        alpha (float): Opacity of the trajectory
-        label (str): Label for the trajectory in the legend
-    """
-    # Create a new figure with a dark background for a space-like feel
-    plt.style.use('dark_background')
-    fig = plt.figure(figsize=(12, 8))
-    ax = fig.add_subplot(111)
-    
-    # Plot trajectory
-    plot_combined_trajectory([
-        (initial_trajectory, initial_control, problem)
-    ], color=color, alpha=alpha, label=label)
-    
-    # Add celestial bodies
-    earth_circle = plt.Circle((problem.earth_pos_normalized[0], problem.earth_pos_normalized[1]), 
-                            problem.earth.radius, color='blue', alpha=0.8, label='Earth')
-    moon_circle = plt.Circle((problem.moon_pos_normalized[0], problem.moon_pos_normalized[1]), 
-                           problem.moon.radius, color='gray', alpha=0.8, label='Moon')
-    ax.add_patch(earth_circle)
-    ax.add_patch(moon_circle)
-    
-    # Add grid, legend and title
-    plt.grid(True, alpha=0.2)
-    plt.legend(loc='upper right')
-    plt.title('Earth Return Trajectory Optimization', fontsize=14, pad=20)
-    
-    # Add some stars in the background
-    num_stars = 100
-    x_stars = np.random.uniform(-2, 2, num_stars)
-    y_stars = np.random.uniform(-2, 2, num_stars)
-    plt.scatter(x_stars, y_stars, color='white', alpha=0.5, s=1)
-    
-    plt.axis('equal')
-    plt.tight_layout()
-    plt.show()
+
 
 def apollo_11_mission(earth, moon):
-    mission_duration = 700
+    mission_duration = 850
     num_steps_per_timestep = 20
     rtol = 1e-6
     atol = 1e-6
@@ -280,7 +239,7 @@ def apollo_11_mission(earth, moon):
     initial_control = apollo_11.control_sequence
 
     # Now we're going to optimize the first part of the trajectory
-    plot_combined_trajectory([(initial_trajectory, initial_control, apollo_11)])
+    #plot_combined_trajectory([(initial_trajectory, initial_control, apollo_11)])
     # Define the optimizer parameters
     x0 = np.array([tli_time, tli_delta_v])
     min_time_step = 1 / num_steps_per_timestep
@@ -289,9 +248,10 @@ def apollo_11_mission(earth, moon):
     max_delta_v = 10
 
     # Run the hybrid optimization
-    #optimizer = HybridOptimizer(apollo_11, use_gradient_refinement=True, stage1_method="pso", initial_conditions=x0)
-    optimizer = CrossEntropyOptimizer(apollo_11, x0, min_time_step, max_time_step, min_delta_v, max_delta_v, rtol, atol)
-    best_control = optimizer.optimize(num_samples=50, n_best=3, iterations=3, time_variance=1e-1, delta_v_variance=1e-3, decay_rate=0.5)
+    optimizer = HybridOptimizer(apollo_11, use_gradient_refinement=True, stage1_method="pso", initial_conditions=x0)
+    best_control = optimizer.optimize()
+    #optimizer = CrossEntropyOptimizer(apollo_11, x0, min_time_step, max_time_step, min_delta_v, max_delta_v, rtol, atol)
+    #best_control = optimizer.optimize(num_samples=50, n_best=3, iterations=3, time_variance=.5, delta_v_variance=1e-2, decay_rate=0.5)
 
     # Add the optimized burn to the trajectory
     apollo_11.clear_control_sequence()
@@ -300,7 +260,7 @@ def apollo_11_mission(earth, moon):
     print("\nOptimized trajectory:")
     constraints, valid_trajectory = apollo_11.evaluate(True)
 
-    plot_combined_trajectory([(apollo_11.trajectory, apollo_11.control_sequence, apollo_11)])
+    #plot_combined_trajectory([(apollo_11.trajectory, apollo_11.control_sequence, apollo_11)])
 
     # 2. Transition to a circular moon orbit
     tangent_point, inertial_moon_orbit_delta_v1 = apollo_11.find_moon_orbit_delta_v()
@@ -311,8 +271,8 @@ def apollo_11_mission(earth, moon):
     x0 = np.array([
         tangent_point[0],  # x position
         tangent_point[1],  # y position
-        start_velocity[0],
-        start_velocity[1]
+        -start_velocity[0],
+        -start_velocity[1]
     ])
 
     # Define a Problem object for the second part of the mission
@@ -331,35 +291,37 @@ def apollo_11_mission(earth, moon):
     # But I'm gonna use keplers third law just to be a badass!
     moon_orbit_time = 2 * np.pi * r_moon**1.5 / np.sqrt(moon.G * moon.mass)
 
-    # TODO: Find good initial conditions for the return burn AFTER optimizing the first part of the trajectory
-    return_burn_time = moon_orbit_time * 1.1  # after 1 full orbit + buffer
-    v_circular = np.linalg.norm(x0[2:4])  # current moon orbit velocity
-    v_escape = np.sqrt(2 * moon.G * moon.mass / r_moon)
-    delta_v_guess = v_escape - v_circular  # or maybe just 0.7 to 1.2 km/s
-
-    
+    burn_delta_v = 1
+    burn_time = 6
     moon_orbit_duration = n_orbits * moon_orbit_time
-    apollo_11_pt2.add_burn_to_trajectory(delta_v_guess, moon_orbit_duration + return_burn_time, rtol, atol)
+
+    # Find a good inital guess for the return burn
+    apollo_11_pt2.simulate_trajectory(rtol, atol)
+    perigee_time, delta_v = apollo_11_pt2.find_valid_trajectory(moon_orbit_duration)
+
+    apollo_11_pt2.add_burn_to_trajectory(delta_v, perigee_time, rtol, atol)
     apollo_11_pt2.simulate_trajectory(rtol, atol)
     initial_trajectory_pt2 = apollo_11_pt2.trajectory
     initial_control_pt2 = apollo_11_pt2.control_sequence
+    # Print the inital objective function and constraints
+    print("\nInitial trajectory:")
+    penalty, earth_return_trajectory = apollo_11_pt2.evaluate(True)
 
     plot_combined_trajectory([(initial_trajectory_pt2, initial_control_pt2, apollo_11_pt2)])
 
-    # Print the inital objective function and constraints
-    penalty, earth_return_trajectory = apollo_11_pt2.evaluate(True)
+    
     print("\nInitial objective function:", penalty)
     print("Initial constraints:", earth_return_trajectory)
 
     # Define the optimizer parameters
-    x0 = np.array([return_burn_time, delta_v_guess])
+    x0 = np.array([perigee_time, delta_v])
+
 
     # Run the hybrid optimization
-    #optimizer = HybridOptimizer(apollo_11_pt2, use_gradient_refinement=True, stage1_method="pso", initial_conditions=x0)
-    #best_control = optimizer.optimize()
-    optimizer = CrossEntropyOptimizer(apollo_11_pt2, x0, min_time_step, max_time_step, min_delta_v, max_delta_v, rtol, atol)
-    best_control = optimizer.optimize(num_samples=50, n_best=3, iterations=3, time_variance=1e-1, delta_v_variance=1e-3, decay_rate=0.5)
-
+    optimizer = HybridOptimizer(apollo_11_pt2, use_gradient_refinement=True, stage1_method="pso", initial_conditions=x0)
+    best_control = optimizer.optimize()
+    #optimizer = CrossEntropyOptimizer(apollo_11_pt2, x0, min_time_step, max_time_step, min_delta_v, max_delta_v, rtol, atol)
+    #best_control = optimizer.optimize(num_samples=50, n_best=3, iterations=3, time_variance=1, delta_v_variance=1e-3, decay_rate=0.5)
 
     # Add the optimized burn to the trajectory
     apollo_11_pt2.clear_control_sequence()
@@ -368,14 +330,8 @@ def apollo_11_mission(earth, moon):
     print("\nOptimized trajectory:")
     constraints, valid_trajectory = apollo_11_pt2.evaluate(True)
 
-    print("\nOptimized objective function:", penalty)
-    print("Optimized constraints:", earth_return_trajectory)
+    #plot_combined_trajectory([(apollo_11_pt2.trajectory, apollo_11_pt2.control_sequence, apollo_11_pt2)])
 
-    # Plot initial and optimized trajectories
-    plot_mission_trajectory(initial_trajectory_pt2, initial_control_pt2, apollo_11_pt2, 
-                          color='red', alpha=0.3, label='Initial Trajectory')
-    plot_mission_trajectory(apollo_11_pt2.trajectory, apollo_11_pt2.control_sequence, apollo_11_pt2,
-                          color='cyan', alpha=1.0, label='Optimized Trajectory')
 
 def main():
     """Main function to run the simulation."""

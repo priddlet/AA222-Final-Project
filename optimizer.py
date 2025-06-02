@@ -122,9 +122,6 @@ class CrossEntropyOptimizer:
             time_samples = np.random.normal(mean[0], np.sqrt(variance[0]), size=(num_samples, 1))
             delta_v_samples = np.random.normal(mean[1], np.sqrt(variance[1]), size=(num_samples, 1))
 
-            time_samples = np.clip(time_samples, self.min_time_step, self.max_time_step)
-            delta_v_samples = np.clip(delta_v_samples, self.min_delta_v, self.max_delta_v)
-
             samples = np.hstack((time_samples, delta_v_samples))
             scores = []
             valid_samples = []
@@ -135,7 +132,7 @@ class CrossEntropyOptimizer:
                 self.problem.clear_control_sequence()
                 self.problem.add_burn_to_trajectory(sample[1], sample[0], self.rtol, self.atol)
                 self.problem.simulate_trajectory(self.rtol, self.atol)
-                score, valid_trajectory = self.problem.lunar_insertion_evaluate(False)
+                score, valid_trajectory = self.problem.evaluate(False)
 
                 if valid_trajectory:
                     print(f"Valid trajectory found in iteration {i}")

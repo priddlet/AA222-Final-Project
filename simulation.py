@@ -404,28 +404,36 @@ class Problem:
         Args:
             verbose (bool): Whether to print verbose output
         """
-        # Make sure we cross over the earth's y axis twice and then swich signs across the x axis
+        return_trajectory = False
+
+        # First we want to make sure we have a valid trajectory
         earth = self.objects[0]
+
+        # Displacement from Earth
         earth_x_displacement = self.trajectory[:, 0] - earth.position[0]
         earth_y_displacement = self.trajectory[:, 1] - earth.position[1]
+
+        # Detect x-axis crossings after Moon loop
+        sign_x = np.sign(earth_x_displacement)
+
         earth_first_cross_index = None
         earth_second_cross_index = None
-        earth_return_trajectory = False
 
-        sign_x = np.sign(earth_x_displacement)
         for i in range(1, len(sign_x)):
-            if sign_x[i] != sign_x[i - 1] and sign_x[i] != 0:
+            if sign_x[i] != sign_x[i - 1] and sign_x[i] != 0 and sign_x[i - 1] != 0:
                 if earth_first_cross_index is None:
                     earth_first_cross_index = i
                 else:
                     earth_second_cross_index = i
                     break
-        
+
+        # Check that both Earth crossings are on the same side in x-direction
         if earth_first_cross_index is not None and earth_second_cross_index is not None:
-            earth_first_cross_y = earth_y_displacement[earth_first_cross_index]
-            earth_second_cross_y = earth_y_displacement[earth_second_cross_index]
-            earth_return_trajectory = ((earth_first_cross_y > 0 and earth_second_cross_y > 0)
-                                           or (earth_first_cross_y < 0 and earth_second_cross_y < 0))
+            y1 = earth_y_displacement[earth_first_cross_index]
+            y2 = earth_y_displacement[earth_second_cross_index]
+
+            # Check that the trajectory crosses the x axis in the opposite direction
+            return_trajectory = np.sign(y1) != np.sign(y2)
         
         # Then we want to find the closest point to our end conditions
         # First find the closest point to LEO
@@ -446,7 +454,7 @@ class Problem:
         penalty = 0
 
         # Fixed constraint penalties
-        penalty += 1e6 * earth_return_trajectory
+        penalty += 1e6 * (1 - return_trajectory)
 
         # Then we have our variable constraint penalties
         penalty += 50 * r_error
@@ -462,11 +470,41 @@ class Problem:
 
 
         if verbose:
-            print("Earth return trajectory:", earth_return_trajectory)
+            print("Earth return trajectory:", return_trajectory)
             print("Time to complete trajectory:", finish_time)
             print("Total Delta-v used:", self.total_delta_v_constraint())
             print("Penalty:", penalty)
-        return penalty, earth_return_trajectory
+        return penalty, return_trajectory
+        
+    def find_valid_trajectory(self, orbit_time):
+        # Find the first point in the trajectory where the velocity is along the y axis
+        # Find the index closest to the specified orbit time
+        closest_time_index = np.argmin(np.abs(self.t_eval - orbit_time))
+        
+        # Find the index of the first point where the velocity is along the y axis
+        perigee_index = None
+        # Find the next index where we cross the moon's x axis
+        last_sign = np.sign(self.trajectory[closest_time_index, 1] - self.objects[1].position[1])
+        for i in range(closest_time_index, len(self.trajectory)):
+            new_sign = np.sign(self.trajectory[i, 1] - self.objects[1].position[1])
+            if new_sign != last_sign:
+                perigee_index = i
+                break
+            last_sign = new_sign
+
+        perigee_time = self.t_eval[perigee_index]
+        leo_radius = self.leo_radius
+        r = np.linalg.norm(self.trajectory[perigee_index][:2] - self.objects[1].position)
+        r_prime = np.linalg.norm(self.trajectory[perigee_index][:2] - self.objects[0].position + leo_radius)
+        a = (r + r_prime) / 2
+        v_req = np.sqrt(self.mu * (2/r - 1/a))
+        v_cur = np.linalg.norm(self.trajectory[perigee_index][2:4])
+        x_loc = self.trajectory[perigee_index][0] / (self.objects[1].position[0] - self.objects[0].position[0])
+        delta_v = v_req - v_cur 
+        return perigee_time, -delta_v
+        
+        
+
         
 
         
