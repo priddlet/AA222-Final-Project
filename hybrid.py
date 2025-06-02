@@ -51,24 +51,28 @@ class ParticleSwarmOptimizerWrapper:
         self.traj_problem = TrajectoryOptimizationProblem(problem)
         self.swarm_size = swarm_size
         self.max_iter = max_iter
+        self.initial_guess = None  # Allow external initial seed
 
     def optimize(self, dim_shape):
         inertia = 0.5
         cognitive = 1.5
         social = 1.5
 
-        positions = np.random.uniform(-0.01, 0.01, (self.swarm_size, 2))
+        positions = np.random.uniform(-0.01, 0.01, (self.swarm_size,) + dim_shape)
+        if self.initial_guess is not None:
+            positions[0] = self.initial_guess
+
         velocities = np.zeros_like(positions)
         personal_best = positions.copy()
         personal_best_scores = np.array([self.traj_problem.objective(p)[0] for p in positions])
-        
+
         global_best_idx = np.argmin(personal_best_scores)
         global_best = personal_best[global_best_idx].copy()
 
         for iter in range(self.max_iter):
             for i in range(self.swarm_size):
-                r1 = np.random.rand(2)
-                r2 = np.random.rand(2)
+                r1 = np.random.rand(*dim_shape)
+                r2 = np.random.rand(*dim_shape)
                 velocities[i] = (
                     inertia * velocities[i]
                     + cognitive * r1 * (personal_best[i] - positions[i])
@@ -97,25 +101,25 @@ class HybridOptimizer:
 
     def optimize(self):
         print("[Stage 1] Global Search")
+
         if self.stage1_method == "ga":
             stage1 = GeneticOptimizer(self.problem)
             if self.initial_conditions is not None:
                 stage1.best_sequence = self.initial_conditions
             best_sequence = stage1.optimize()
+
         elif self.stage1_method == "pso":
             stage1 = ParticleSwarmOptimizerWrapper(self.problem)
             if self.initial_conditions is not None:
-                stage1.global_best = self.initial_conditions
+                stage1.initial_guess = self.initial_conditions
             best_sequence = stage1.optimize(dim_shape=(2,))
+
         else:
             raise ValueError("Unknown stage 1 method: choose 'ga' or 'pso'")
 
         print("[Stage 2] Cross Entropy Refinement")
         cem = CrossEntropyOptimizerWrapper(self.problem)
-        if self.initial_conditions is not None:
-            best_sequence = cem.optimize(self.initial_conditions, log_history=True)
-        else:
-            best_sequence = cem.optimize(best_sequence, log_history=True)
+        best_sequence = cem.optimize(best_sequence, log_history=True)
 
         if self.use_gradient_refinement:
             print("[Stage 3] Gradient-Based Refinement")
