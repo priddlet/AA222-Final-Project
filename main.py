@@ -239,10 +239,10 @@ def plot_mission_trajectory(initial_trajectory, initial_control, problem, color=
     plt.show()
 
 def apollo_11_mission(earth, moon):
-    mission_duration = 1000
+    mission_duration = 700
     num_steps_per_timestep = 20
-    rtol = 1e-7
-    atol = 1e-9
+    rtol = 1e-6
+    atol = 1e-6
     length_of_timestep = 383.0 / num_steps_per_timestep
     print(f"Length of timestep: {length_of_timestep} seconds")
 
@@ -267,8 +267,8 @@ def apollo_11_mission(earth, moon):
     apollo_11 = Problem(initial_conditions, [earth, moon], mission_duration, num_steps_per_timestep, "lunar_insertion")
 
     # 1. TLI (Trans-Lunar Injection) burn
-    tli_delta_v = 3.152# km/s
-    tli_time = 2.0
+    tli_delta_v = 3.15011329# km/s
+    tli_time = 1.98527651
     apollo_11.add_burn_to_trajectory(tli_delta_v, tli_time, rtol, atol)
     apollo_11.simulate_trajectory(rtol, atol)
 
@@ -281,7 +281,6 @@ def apollo_11_mission(earth, moon):
 
     # Now we're going to optimize the first part of the trajectory
     plot_combined_trajectory([(initial_trajectory, initial_control, apollo_11)])
-
     # Define the optimizer parameters
     x0 = np.array([tli_time, tli_delta_v])
     min_time_step = 1 / num_steps_per_timestep
@@ -290,8 +289,9 @@ def apollo_11_mission(earth, moon):
     max_delta_v = 10
 
     # Run the hybrid optimization
-    optimizer = HybridOptimizer(apollo_11, use_gradient_refinement=True, stage1_method="pso", initial_conditions=x0)
-    best_control = optimizer.optimize()
+    #optimizer = HybridOptimizer(apollo_11, use_gradient_refinement=True, stage1_method="pso", initial_conditions=x0)
+    optimizer = CrossEntropyOptimizer(apollo_11, x0, min_time_step, max_time_step, min_delta_v, max_delta_v, rtol, atol)
+    best_control = optimizer.optimize(num_samples=50, n_best=3, iterations=3, time_variance=1e-1, delta_v_variance=1e-3, decay_rate=0.5)
 
     # Add the optimized burn to the trajectory
     apollo_11.clear_control_sequence()
@@ -299,6 +299,8 @@ def apollo_11_mission(earth, moon):
     apollo_11.simulate_trajectory(rtol, atol)
     print("\nOptimized trajectory:")
     constraints, valid_trajectory = apollo_11.evaluate(True)
+
+    plot_combined_trajectory([(apollo_11.trajectory, apollo_11.control_sequence, apollo_11)])
 
     # 2. Transition to a circular moon orbit
     tangent_point, inertial_moon_orbit_delta_v1 = apollo_11.find_moon_orbit_delta_v()
@@ -353,8 +355,11 @@ def apollo_11_mission(earth, moon):
     x0 = np.array([return_burn_time, delta_v_guess])
 
     # Run the hybrid optimization
-    optimizer = HybridOptimizer(apollo_11_pt2, use_gradient_refinement=True, stage1_method="pso", initial_conditions=x0)
-    best_control = optimizer.optimize()
+    #optimizer = HybridOptimizer(apollo_11_pt2, use_gradient_refinement=True, stage1_method="pso", initial_conditions=x0)
+    #best_control = optimizer.optimize()
+    optimizer = CrossEntropyOptimizer(apollo_11_pt2, x0, min_time_step, max_time_step, min_delta_v, max_delta_v, rtol, atol)
+    best_control = optimizer.optimize(num_samples=50, n_best=3, iterations=3, time_variance=1e-1, delta_v_variance=1e-3, decay_rate=0.5)
+
 
     # Add the optimized burn to the trajectory
     apollo_11_pt2.clear_control_sequence()

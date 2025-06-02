@@ -121,9 +121,6 @@ class Problem:
         current_state = np.concatenate([initial_position, initial_velocity])
         current_time_index = 0
 
-        if not np.all(np.isfinite(current_state)):
-            raise ValueError(f"[ERROR] Initial state contains NaNs or infs: {current_state}")
-
         if len(self.control_sequence) > 0:
             for burn in self.control_sequence:
                 if burn.time_index <= current_time_index:
@@ -131,23 +128,12 @@ class Problem:
 
                 t0 = self.t_eval[current_time_index] / time_normalization_factor
                 t1 = burn.time / time_normalization_factor
-                if t1 <= t0:
-                    print(f"[DEBUG] Skipping burn segment from t={t0:.3f} to t={t1:.3f} (non-positive duration)")
-                    continue
 
                 t_span = (t0, t1)
                 t_eval = self.t_eval[current_time_index:burn.time_index] / time_normalization_factor
 
-                print(f"[DEBUG] Burn segment from t={t_span[0]:.3f} to t={t_span[1]:.3f}")
-                print(f"[DEBUG] Current state before burn: {current_state}")
-
                 result = solve_ivp(self.cr3bp_dynamics, t_span, current_state,
                                 t_eval=t_eval, method='RK45', rtol=rtol, atol=atol)
-
-                if not result.success:
-                    raise RuntimeError(f"Trajectory integration failed: {result.message}")
-                if not hasattr(result, "y") or len(np.asarray(result.y).shape) < 2 or result.y.shape[1] == 0:
-                    raise RuntimeError("Integration returned invalid or empty result before burn.")
 
                 all_trajectories.append(result.y.T)
                 all_times.append(result.t)
@@ -157,30 +143,14 @@ class Problem:
                 current_time_index = burn.time_index
                 burn.set_coordinates(current_state[:2] * length_normalization)
 
-        # Final segment after last burn
-        if current_time_index >= len(self.t_eval) - 1:
-            print("[DEBUG] No final propagation needed — already at end of t_eval.")
-            return
-
         t0_final = self.t_eval[current_time_index] / time_normalization_factor
         t1_final = self.t_eval[-1] / time_normalization_factor
-        if t1_final <= t0_final:
-            print(f"[DEBUG] Skipping final propagation from t={t0_final:.3f} to t={t1_final:.3f} (non-positive duration)")
-            return
-
-        print(f"[DEBUG] Final segment from t={t0_final:.3f} to {t1_final:.3f}")
-        print(f"[DEBUG] Final state before integration: {current_state}")
 
         t_span_final = (t0_final, t1_final)
         t_eval_final = self.t_eval[current_time_index:] / time_normalization_factor
 
         result_final = solve_ivp(self.cr3bp_dynamics, t_span_final, current_state,
                                 t_eval=t_eval_final, method='RK45', rtol=rtol, atol=atol)
-
-        if not result_final.success:
-            raise RuntimeError(f"Final trajectory integration failed: {result_final.message}")
-        if not hasattr(result_final, "y") or len(np.asarray(result_final.y).shape) < 2 or result_final.y.shape[1] == 0:
-            raise RuntimeError("Final integration returned invalid or empty trajectory.")
 
         all_trajectories.append(result_final.y.T)
         all_times.append(result_final.t)
@@ -258,63 +228,80 @@ class Problem:
         completed_moon_orbit = False
         free_return_trajectory = False
         finish_time = np.inf
+        first_cross_distance = np.inf
+        second_cross_distance = np.inf
 
-        # Check if the trajectory crosses the moon's x-axis twice
+        # Check if the trajectory crosses the moon's y-axis twice
         
-        first_cross_index = None
+        first_cross_index = None 
         second_cross_index = None
 
+        # Displacements from Moon's position
+        moon_x_displacement = self.trajectory[:, 0] - moon.position[0]
+        moon_y_displacement = self.trajectory[:, 1] - moon.position[1]
+
+        # Look for two sign changes in x-displacement (crossing Moon’s vertical axis)
         sign_x = np.sign(moon_x_displacement)
+
         for i in range(1, len(sign_x)):
-            if sign_x[i] != sign_x[i - 1] and sign_x[i] != 0:
+            if sign_x[i] != sign_x[i - 1] and sign_x[i] != 0 and sign_x[i - 1] != 0:
                 if first_cross_index is None:
                     first_cross_index = i
                 else:
                     second_cross_index = i
                     break
-        
-        # Check if at those two points the y displacement is on opposite sides of the moon
-        if first_cross_index is not None and second_cross_index is not None:
-            first_cross_y = moon_y_displacement[first_cross_index]
-            second_cross_y = moon_y_displacement[second_cross_index]
-            completed_moon_orbit = ((first_cross_y > 0 and second_cross_y > 0)
-                                    or (first_cross_y < 0 and second_cross_y < 0))
 
-        # Then, if we did make it around the moon, check if we complete an orbit around the earth afterwards
+        # Confirm the orbit crossed to the other side of the Moon (in y-direction at those points)
+        if first_cross_index is not None and second_cross_index is not None:
+            first_y = moon_y_displacement[first_cross_index]
+            second_y = moon_y_displacement[second_cross_index]
+
+            # Opposite sides of Moon in y-direction
+            completed_moon_orbit = np.sign(first_y) != np.sign(second_y)
+            if completed_moon_orbit:
+                first_cross_distance = np.linalg.norm(self.trajectory[first_cross_index][:2] - moon.position)
+                second_cross_distance = np.linalg.norm(self.trajectory[second_cross_index][:2] - moon.position)
+        else:
+            completed_moon_orbit = False
+
+        # If we completed the moon orbit, we need to check that we can make it back to earth
         if completed_moon_orbit:
             earth = self.objects[0]
-            
-            # Displacement relative to Earth
-            earth_x_displacement = self.trajectory[:, 0] - earth.position[0]
-            earth_y_displacement = self.trajectory[:, 1] - earth.position[1]
 
-            # Slice from the point after the moon orbit
-            earth_x_displacement = earth_x_displacement[second_cross_index:]
-            earth_y_displacement = earth_y_displacement[second_cross_index:]
+            # Displacement from Earth
+            earth_x_displacement_full = self.trajectory[:, 0] - earth.position[0]
+            earth_y_displacement_full = self.trajectory[:, 1] - earth.position[1]
 
-            # Compute sign array
-            sign_x = np.sign(earth_x_displacement)
+            # Slice post-Moon crossing
+            earth_x_displacement = earth_x_displacement_full[second_cross_index:]
+            earth_y_displacement = earth_y_displacement_full[second_cross_index:]
+
+            # Detect x-axis crossings after Moon loop
+            sign_y = np.sign(earth_y_displacement)
 
             earth_first_cross_index = None
             earth_second_cross_index = None
 
-            for i in range(1, len(sign_x)):
-                if sign_x[i] != sign_x[i - 1] and sign_x[i] != 0:
+            for i in range(1, len(sign_y)):
+                if sign_y[i] != sign_y[i - 1] and sign_y[i] != 0 and sign_y[i - 1] != 0:
                     if earth_first_cross_index is None:
                         earth_first_cross_index = i
                     else:
                         earth_second_cross_index = i
                         break
 
-            # Proceed only if both crossings are found
+            # Check that both Earth crossings are on the same side in x-direction
             if earth_first_cross_index is not None and earth_second_cross_index is not None:
-                y1 = earth_y_displacement[earth_first_cross_index]
-                y2 = earth_y_displacement[earth_second_cross_index]
+                x1 = earth_x_displacement[earth_first_cross_index]
+                x2 = earth_x_displacement[earth_second_cross_index]
 
-                # Confirm both y-values have the same sign (same side of Earth)
-                free_return_trajectory = (y1 * y2 > 0)
-
-        # Time constraint for completing the whole trajectory should also be captured by these constraints
+                # Check that the trajectory crosses the x axis in the opposite direction
+                free_return_trajectory = np.sign(x1) != np.sign(x2)
+            else:
+                free_return_trajectory = False
+        else:
+            free_return_trajectory = False
+    # Time constraint for completing the whole trajectory should also be captured by these constraints
 
         # Then we want our metric to be the combined error from our target min distance constraints
         constraints = self.planetary_orbit_constraint()
@@ -336,6 +323,7 @@ class Problem:
         delta_v_penalty = 100
         loc, moon_orbit_delta_v = self.find_moon_orbit_delta_v()
         penalty += delta_v_penalty * (self.total_delta_v_constraint() + moon_orbit_delta_v)
+        penalty += first_cross_distance + second_cross_distance
 
         # Add the time penalty
         if free_return_trajectory:
@@ -367,7 +355,8 @@ class Problem:
         moon_orbit_velocity = self.trajectory[:, 2:4]
         search_radius = 200
 
-        min_dot = float("inf")
+        min_dot_req = 1e-3
+        min_dot_value = 1
         best_index = None
 
         i_min = max(0, closest_approach_index - search_radius)
@@ -376,19 +365,16 @@ class Problem:
         for i in range(i_min, i_max):
             vel = moon_orbit_velocity[i]
             disp = np.array([moon_x_displacement[i], moon_y_displacement[i]])
-            if np.linalg.norm(vel) == 0 or np.linalg.norm(disp) == 0:
-                continue
             unit_velocity = vel / np.linalg.norm(vel)
             unit_displacement = disp / np.linalg.norm(disp)
 
             dot = abs(np.dot(unit_velocity, unit_displacement))  # 0 = tangent
-            if dot < min_dot:
-                min_dot = dot
+            if dot <= min_dot_req:
                 best_index = i
-
-        if best_index is None or min_dot > 0.3:  # Allow a loose threshold
-            raise ValueError(f"No tangent point found. Closest dot = {min_dot:.5f}")
-
+                break
+            if dot < min_dot_value:
+                min_dot_value = dot
+                best_index = i
         tangent_point = self.trajectory[best_index]
         moon_orbit_radius = np.linalg.norm(tangent_point[:2] - moon.position)
         moon_orbit_speed = np.sqrt(self.mu / moon_orbit_radius)
@@ -409,9 +395,7 @@ class Problem:
             min_dist = np.min(dists)
             # Enforce a minimum radius from each object
             dist_error = obj.protected_zone - min_dist
-            max_dist_error = -1 * (obj.max_orbit - min_dist)
             dist_errors.append(dist_error)
-            dist_errors.append(max_dist_error)
         return np.array(dist_errors)
     
     def earth_return_evaluate(self, verbose):
