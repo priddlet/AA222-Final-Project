@@ -114,7 +114,17 @@ class CrossEntropyOptimizer:
         self.atol = atol
         self.best, self.valid = self.problem.lunar_insertion_evaluate(False)
 
-    def optimize(self, num_samples, n_best, iterations, time_variance, delta_v_variance, decay_rate):
+    def evaluate_objective(self, x):
+        self.problem.clear_control_sequence()
+        self.problem.add_burn_to_trajectory(x[1], x[0], self.rtol, self.atol)
+        try:
+            self.problem.simulate_trajectory(self.rtol, self.atol)
+            score, valid = self.problem.evaluate(False)
+            return score if valid else 1e10
+        except:
+            return 1e10
+
+    def optimize(self, num_samples, n_best, iterations, time_variance, delta_v_variance, decay_rate, use_local_refinement=True):
         mean = self.x0.copy()
         variance = np.array([time_variance, delta_v_variance])
 
@@ -131,13 +141,15 @@ class CrossEntropyOptimizer:
 
                 self.problem.clear_control_sequence()
                 self.problem.add_burn_to_trajectory(sample[1], sample[0], self.rtol, self.atol)
-                self.problem.simulate_trajectory(self.rtol, self.atol)
-                score, valid_trajectory = self.problem.evaluate(False)
-
-                if valid_trajectory:
-                    print(f"Valid trajectory found in iteration {i}")
-                    scores.append(score)
-                    valid_samples.append(sample)
+                try:
+                    self.problem.simulate_trajectory(self.rtol, self.atol)
+                    score, valid = self.problem.evaluate(False)
+                    if valid:
+                        scores.append(score)
+                        valid_samples.append(sample)
+                        print(f"  ✓ Valid trajectory with score {score:.4f}")
+                except:
+                    continue
 
             if len(scores) == 0:
                 print(f"No valid trajectories found in iteration {i}")
@@ -145,7 +157,7 @@ class CrossEntropyOptimizer:
                 continue
 
             best_indices = np.argsort(scores)[:n_best]
-            best_samples = np.array([valid_samples[i] for i in best_indices])
+            best_samples = np.array([valid_samples[j] for j in best_indices])
             best_score = scores[best_indices[0]]
             mean = np.mean(best_samples, axis=0)
             variance *= decay_rate
@@ -153,8 +165,20 @@ class CrossEntropyOptimizer:
             if best_score < self.best:
                 self.best = best_score
                 self.x0 = best_samples[0]
-                print(f"Updated best score to {self.best:.4f} with parameters {self.x0}")
+                print(f"  ✳ Updated best score to {self.best:.4f} with parameters {self.x0}")
 
-            print(f"Iteration {i}: Best Score = {self.best:.4f}")
+            print(f"Iteration {i}: Current best score = {self.best:.4f}")
+
+        if use_local_refinement:
+            print("Starting local refinement (L-BFGS-B)...")
+            bounds = [(self.min_time_step, self.max_time_step), (self.min_delta_v, self.max_delta_v)]
+            res = np.minimize(self.evaluate_objective, self.x0, bounds=bounds, method='L-BFGS-B')
+
+            if res.success and res.fun < self.best:
+                self.best = res.fun
+                self.x0 = res.x
+                print(f"✓ Local refinement improved score to {self.best:.4f} with parameters {self.x0}")
+            else:
+                print("✗ Local refinement did not improve the score")
 
         return self.x0
