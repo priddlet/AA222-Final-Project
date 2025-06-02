@@ -32,7 +32,7 @@ class Problem:
         max_terminal_speed (float): Maximum terminal speed
     """
     
-    def __init__(self, initial_conditions, objects: list[Object], mission_duration, num_steps_per_timestep):
+    def __init__(self, initial_conditions, objects: list[Object], mission_duration, num_steps_per_timestep,type):
         """Initialize the problem.
         
         Args:
@@ -67,6 +67,12 @@ class Problem:
         self.reentry_angle_tolerance = 1.0
         self.min_allowed_dist = 1e-3
         self.max_terminal_speed = np.sqrt(1 / self.leo_radius)
+
+        # Set the type of problem
+        if type == "lunar_insertion":
+            self.evaluate = self.lunar_insertion_evaluate
+        elif type == "earth_return":
+            self.evaluate = self.earth_return_evaluate
 
     class Burn:
         def __init__(self, delta_v, time, time_index):
@@ -158,7 +164,51 @@ class Problem:
         trajectory_array[:, 2:] *= velocity_normalization  # Velocity components
         self.trajectory = trajectory_array
         self.t = np.concatenate(all_times) * time_normalization_factor
+    
 
+    def set_control_sequence(self, control_sequence):
+        """Set the control sequence for the trajectory.
+        
+        Args:
+            control_sequence (np.ndarray): Control sequence in format [time, delta_v]
+        """
+        self.clear_control_sequence()
+        time = control_sequence[0]
+        delta_v_amount = control_sequence[1]
+        self.add_burn_to_trajectory(delta_v_amount, time, rtol=1e-7, atol=1e-9)
+
+    def add_burn_to_trajectory(self, delta_v_amount, time, rtol, atol):
+        """Apply a delta-v burn to the trajectory.
+        
+        Args:
+            delta_v_amount (float): Amount of delta-v
+            time (float): Time of the burn
+            rtol (float): Relative tolerance for simulation
+            atol (float): Absolute tolerance for simulation
+        """
+        # Get velocity direction at burn time
+        if self.trajectory is None:
+            self.simulate_trajectory(rtol, atol)
+        
+        # Get state at burn time
+        time_idx = np.abs(self.t_eval - time).argmin()
+        effective_burn_time = self.t_eval[time_idx]
+        state = self.trajectory[time_idx]
+        vx, vy = state[2:4]
+        
+        # Normalize velocity vector to get direction
+        v_mag = np.sqrt(vx**2 + vy**2)
+        if v_mag > 0:
+            v_dir = np.array([vx/v_mag, vy/v_mag])
+        else:
+            v_dir = np.array([1, 0])  # Default direction if velocity is zero
+
+        # Add the burn to the control sequence
+        self.control_sequence.append(self.Burn(
+            np.array([delta_v_amount * v_dir[0], delta_v_amount * v_dir[1]]),
+            effective_burn_time,
+            time_idx
+        ))
 
     def lunar_insertion_evaluate(self,verbose):
         """Evaluate the lunar insertion constraint.
@@ -331,37 +381,6 @@ class Problem:
             dist_errors.append(max_dist_error)
         return np.array(dist_errors)
     
-    def add_burn_to_trajectory(self, delta_v_amount, time, rtol, atol):
-        """Apply a delta-v burn to the trajectory.
-        
-        Args:
-            delta_v_amount (float): Amount of delta-v
-            time (float): Time
-        """
-        # Get velocity direction at burn time
-        if self.trajectory is None:
-            self.simulate_trajectory(rtol, atol)
-            
-        # Get state at burn time
-        time_idx = np.abs(self.t_eval - time).argmin()
-        effective_burn_time = self.t_eval[time_idx]
-        state = self.trajectory[time_idx]
-        vx, vy = state[2:4]
-        
-        # Normalize velocity vector to get direction
-        v_mag = np.sqrt(vx**2 + vy**2)
-        if v_mag > 0:
-            v_dir = np.array([vx/v_mag, vy/v_mag])
-        else:
-            v_dir = np.array([1, 0])  # Default direction if velocity is zero
-
-        # Add the burn to the control sequence
-        self.control_sequence.append(self.Burn(
-            np.array([delta_v_amount * v_dir[0],  delta_v_amount * v_dir[1]]),
-            effective_burn_time,
-            time_idx
-        ))
-
     def earth_return_evaluate(self, verbose):
         """Evaluate the earth return constraint.
         

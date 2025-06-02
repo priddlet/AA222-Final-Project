@@ -57,17 +57,21 @@ class ParticleSwarmOptimizerWrapper:
         cognitive = 1.5
         social = 1.5
 
-        positions = np.random.uniform(-0.01, 0.01, (self.swarm_size,) + dim_shape)
+        # Initialize positions as a 2D array of shape (swarm_size, 2)
+        positions = np.random.uniform(-0.01, 0.01, (self.swarm_size, 2))
         velocities = np.zeros_like(positions)
         personal_best = positions.copy()
+        
+        # Evaluate each position (which is a 2D vector [time, delta_v])
         personal_best_scores = np.array([self.traj_problem.objective(p)[0] for p in positions])
+        
         global_best_idx = np.argmin(personal_best_scores)
-        global_best = personal_best[global_best_idx]
+        global_best = personal_best[global_best_idx].copy()
 
         for iter in range(self.max_iter):
             for i in range(self.swarm_size):
-                r1 = np.random.rand(*dim_shape)
-                r2 = np.random.rand(*dim_shape)
+                r1 = np.random.rand(2)  # Random vector of size 2
+                r2 = np.random.rand(2)  # Random vector of size 2
                 velocities[i] = (
                     inertia * velocities[i]
                     + cognitive * r1 * (personal_best[i] - positions[i])
@@ -81,32 +85,42 @@ class ParticleSwarmOptimizerWrapper:
                     personal_best_scores[i] = score
 
             global_best_idx = np.argmin(personal_best_scores)
-            global_best = personal_best[global_best_idx]
+            global_best = personal_best[global_best_idx].copy()
             print(f"[PSO] Iter {iter}: Best Score = {personal_best_scores[global_best_idx]:.4f}")
 
         return global_best
 
 
 class HybridOptimizer:
-    def __init__(self, problem, use_gradient_refinement=True, stage1_method="ga"):
+    def __init__(self, problem, use_gradient_refinement=True, stage1_method="ga", initial_conditions=None):
         self.problem = problem
         self.use_gradient_refinement = use_gradient_refinement
         self.stage1_method = stage1_method
+        self.initial_conditions = initial_conditions
 
     def optimize(self):
         print("[Stage 1] Global Search")
         if self.stage1_method == "ga":
             stage1 = GeneticOptimizer(self.problem)
+            if self.initial_conditions is not None:
+                # Initialize population with the initial conditions
+                stage1.best_sequence = self.initial_conditions
             best_sequence = stage1.optimize()
         elif self.stage1_method == "pso":
             stage1 = ParticleSwarmOptimizerWrapper(self.problem)
-            best_sequence = stage1.optimize(dim_shape=(100, 2))  # Replace 100 with t_n
+            if self.initial_conditions is not None:
+                # Initialize swarm with the initial conditions
+                stage1.global_best = self.initial_conditions
+            best_sequence = stage1.optimize(dim_shape=(2,))
         else:
             raise ValueError("Unknown stage 1 method: choose 'ga' or 'pso'")
 
         print("[Stage 2] Cross Entropy Refinement")
         cem = CrossEntropyOptimizerWrapper(self.problem)
-        best_sequence = cem.optimize(best_sequence, log_history=True)
+        if self.initial_conditions is not None:
+            best_sequence = cem.optimize(self.initial_conditions, log_history=True)
+        else:
+            best_sequence = cem.optimize(best_sequence, log_history=True)
 
         if self.use_gradient_refinement:
             print("[Stage 3] Gradient-Based Refinement")
