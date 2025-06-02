@@ -145,7 +145,7 @@ def get_LEO_velocity(initial_x, initial_y, moon, earth):
     return v_rotating * velocity_normalization
 
 def apollo_11_mission(earth, moon):
-    mission_duration = 50
+    mission_duration = 1000
     num_steps_per_timestep = 20
     rtol = 1e-7
     atol = 1e-9
@@ -165,15 +165,15 @@ def apollo_11_mission(earth, moon):
         initial_x,  # x position
         initial_y,  # y position
         0,         # x velocity
-        get_LEO_velocity(initial_x, initial_y, moon, earth) # y velocity
+        -get_LEO_velocity(initial_x, initial_y, moon, earth) # y velocity
     ])
 
     apollo_11 = Problem(initial_conditions, [earth, moon], mission_duration, num_steps_per_timestep)
 
     # Define the three burns for the free return trajectory
     # 1. TLI (Trans-Lunar Injection) burn
-    tli_delta_v = 0#1.54 # km/s
-    tli_time = 5    # minutes after launch
+    tli_delta_v = 3.152# km/s
+    tli_time = 2.0
     apollo_11.add_burn_to_trajectory(tli_delta_v, tli_time, rtol, atol)
     apollo_11.simulate_trajectory(rtol, atol)
 
@@ -186,6 +186,7 @@ def apollo_11_mission(earth, moon):
 
     # Now we're going to optimize the first part of the trajectory
     plot_combined_trajectory([(initial_trajectory, initial_control, apollo_11)])
+    exit()
 
     # Define the optimizer parameters
     x0 = np.array([tli_time, tli_delta_v])
@@ -210,7 +211,7 @@ def apollo_11_mission(earth, moon):
     # Add the burn to the trajectory
     apollo_11.clear_control_sequence()
     apollo_11.add_burn_to_trajectory(best_control[1], best_control[0], rtol, atol)
-    apollo_11.simulate_trajectory(rtol, atol)
+    #apollo_11.simulate_trajectory(rtol, atol)
     print("\nOptimized trajectory:")
     constraints, valid_trajectory = apollo_11.lunar_insertion_evaluate(True)
 
