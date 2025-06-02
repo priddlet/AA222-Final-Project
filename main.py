@@ -144,6 +144,51 @@ def get_LEO_velocity(initial_x, initial_y, moon, earth):
     v_rotating = v_circular_inertial - x_normalized
     return v_rotating * velocity_normalization
 
+def get_moon_orbit_velocity(initial_x, initial_y, moon, earth):
+    """Get the velocity vector needed to be in a circular orbit around the Moon in CR3BP.
+    
+    Args:
+        initial_x (float): x position (in physical units, e.g. km)
+        initial_y (float): y position (in physical units, e.g. km)
+        moon (Object): moon object with .mass and .position
+        earth (Object): earth object with .mass and .position
+    
+    Returns:
+        np.ndarray: velocity vector in physical units (e.g. km/s) in rotating frame
+    """
+    mu = moon.mass / (moon.mass + earth.mass)  # Moon's mass ratio
+    length_normalization = moon.position[0] - earth.position[0]  # Earth–Moon distance
+    time_normalization = 383.0  # seconds per normalized time unit
+    velocity_normalization = length_normalization / time_normalization
+
+    # Normalize positions
+    moon_pos_norm = moon.position / length_normalization
+    x_norm = initial_x / length_normalization
+    y_norm = initial_y / length_normalization
+
+    # Relative position to Moon
+    dx = x_norm - moon_pos_norm[0]
+    dy = y_norm - moon_pos_norm[1]
+    r_moon_orbit = np.sqrt(dx**2 + dy**2)
+
+    # Inertial circular velocity magnitude
+    v_circular_inertial = np.sqrt(mu / r_moon_orbit)
+
+    # Tangent direction (unit vector)
+    unit_velocity_tangent = np.array([dy, dx]) / r_moon_orbit
+    v_inertial_vec = v_circular_inertial * unit_velocity_tangent
+
+    # Rotation-induced velocity at this point (since omega = 1)
+    v_rot_frame = np.array([-y_norm, x_norm])
+
+    # Subtract to get rotating frame velocity vector
+    v_rotating_vec = v_inertial_vec - v_rot_frame 
+
+    # Convert to dimensional (physical) velocity
+    velocity_required = (v_rotating_vec * velocity_normalization) + np.array([-y_norm, x_norm])
+
+    return velocity_required
+
 def apollo_11_mission(earth, moon):
     mission_duration = 1000
     num_steps_per_timestep = 20
@@ -185,10 +230,9 @@ def apollo_11_mission(earth, moon):
     initial_control = apollo_11.control_sequence
 
     # Now we're going to optimize the first part of the trajectory
-    plot_combined_trajectory([(initial_trajectory, initial_control, apollo_11)])
-    exit()
+    #plot_combined_trajectory([(initial_trajectory, initial_control, apollo_11)])
 
-    # Define the optimizer parameters
+    """# Define the optimizer parameters
     x0 = np.array([tli_time, tli_delta_v])
     min_time_step = 1 / num_steps_per_timestep
     max_time_step = 10
@@ -204,8 +248,8 @@ def apollo_11_mission(earth, moon):
     decay_rate = 0.5
 
     # Run the optimization
-    """optimizer = CrossEntropyOptimizer(apollo_11, x0, min_time_step, max_time_step, min_delta_v, max_delta_v, rtol, atol)
-    best_control = optimizer.optimize(num_samples, n_best, iterations, time_variance, delta_v_variance, decay_rate)"""
+    optimizer = CrossEntropyOptimizer(apollo_11, x0, min_time_step, max_time_step, min_delta_v, max_delta_v, rtol, atol)
+    best_control = optimizer.optimize(num_samples, n_best, iterations, time_variance, delta_v_variance, decay_rate)
     best_control = np.array([4.99943793, 1.54261006])
 
     # Add the burn to the trajectory
@@ -213,21 +257,30 @@ def apollo_11_mission(earth, moon):
     apollo_11.add_burn_to_trajectory(best_control[1], best_control[0], rtol, atol)
     #apollo_11.simulate_trajectory(rtol, atol)
     print("\nOptimized trajectory:")
-    constraints, valid_trajectory = apollo_11.lunar_insertion_evaluate(True)
+    constraints, valid_trajectory = apollo_11.lunar_insertion_evaluate(True)"""
 
 
     # 2. Transition to a circular moon orbit
-    tangent_point, moon_orbit_delta_v = apollo_11.find_moon_orbit_delta_v()
+    tangent_point, inertial_moon_orbit_delta_v1 = apollo_11.find_moon_orbit_delta_v()
+    start_velocity = get_moon_orbit_velocity(tangent_point[0], tangent_point[1], moon, earth)
     r_moon = np.linalg.norm(tangent_point[:2] - moon.position)
-    # Calculate velocity needed for circular orbit around the moon
-    v_circular = np.sqrt(moon.G * moon.mass / r_moon)
-    x0 = np.concatenate([tangent_point[:2], v_circular * tangent_point[2:4] / np.linalg.norm(tangent_point[2:4])])
+            
+    # Set up initial conditions for moon orbit
+    x0 = np.array([
+        tangent_point[0],  # x position
+        tangent_point[1],  # y position
+        start_velocity[0],
+        start_velocity[1]
+    ])
 
     # Define a Problem object for the second part of the mission
-    mission_pt2_duration = 20
+    mission_pt2_duration = 1000
     num_steps_per_timestep_pt2 = 20
     apollo_11_pt2 = Problem(x0, [earth, moon], mission_pt2_duration, num_steps_per_timestep_pt2)
+    
+    # Add the moon orbit burn
     apollo_11_pt2.simulate_trajectory(rtol, atol)
+
     
     # Orbit around the moon n times
     n_orbits = 3
@@ -236,14 +289,16 @@ def apollo_11_mission(earth, moon):
     # But I'm gonna use keplers third law just to be a badass!
     moon_orbit_time = 2 * np.pi * r_moon**1.5 / np.sqrt(moon.G * moon.mass)
 
-    return_burn_time = 2
-    return_burn_delta_v = 1
+    return_burn_time = 2.0
+    return_burn_delta_v = 1.0
     
     moon_orbit_duration = n_orbits * moon_orbit_time
     apollo_11_pt2.add_burn_to_trajectory(return_burn_delta_v, moon_orbit_duration + return_burn_time, rtol, atol)
     apollo_11_pt2.simulate_trajectory(rtol, atol)
     initial_trajectory_pt2 = apollo_11_pt2.trajectory
     initial_control_pt2 = apollo_11_pt2.control_sequence
+
+    plot_combined_trajectory([(initial_trajectory_pt2, initial_control_pt2, apollo_11_pt2)])
 
     # Print the inital objective function and constraints
     penalty, earth_return_trajectory = apollo_11_pt2.earth_return_evaluate(True)
@@ -280,7 +335,7 @@ def apollo_11_mission(earth, moon):
     plot_combined_trajectory([(initial_trajectory, initial_control, apollo_11), 
                               (apollo_11.trajectory, apollo_11.control_sequence, apollo_11),
                               (apollo_11_pt2.trajectory, apollo_11_pt2.control_sequence, apollo_11_pt2)])"""
-    plot_combined_trajectory([(initial_trajectory_pt2, initial_control_pt2, apollo_11_pt2)])
+    #plot_combined_trajectory([(initial_trajectory_pt2, initial_control_pt2, apollo_11_pt2)])
 
 def main():
     """Main function to run the simulation."""

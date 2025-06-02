@@ -109,7 +109,6 @@ class Problem:
         self.earth_pos_normalized = self.earth.position / length_normalization
         self.moon_pos_normalized = self.moon.position / length_normalization
         
-
         
         # Start with initial conditions
         # Convert the inital conditions to normalized units
@@ -117,32 +116,30 @@ class Problem:
         initial_velocity = self.initial_conditions[2:4] / velocity_normalization
         current_state = np.concatenate([initial_position, initial_velocity])
         current_time_index = 0
-
-    
-
         
         # Simulate between each burn
-        for burn in self.control_sequence:
-            # Simulate up to the burn time
-            t_span = (self.t_eval[current_time_index] / time_normalization_factor, burn.time / time_normalization_factor)
-            t_eval = self.t_eval[current_time_index:burn.time_index] / time_normalization_factor
+        if len(self.control_sequence) > 0:
+            for burn in self.control_sequence:
+                # Simulate up to the burn time
+                t_span = (self.t_eval[current_time_index] / time_normalization_factor, burn.time / time_normalization_factor)
+                t_eval = self.t_eval[current_time_index:burn.time_index] / time_normalization_factor
 
-            sol= solve_ivp(self.cr3bp_dynamics, t_span, current_state,
-                                t_eval=t_eval, method='RK45', rtol=rtol_sim, atol=atol_sim)
+                sol= solve_ivp(self.cr3bp_dynamics, t_span, current_state,
+                                    t_eval=t_eval, method='RK45', rtol=rtol_sim, atol=atol_sim)
 
-            if not sol.success:
-                raise RuntimeError(f"Trajectory integration failed: {sol.message}")
+                if not sol.success:
+                    raise RuntimeError(f"Trajectory integration failed: {sol.message}")
 
-            all_trajectories.append(np.transpose(sol.y))
-            all_times.append(sol.t)
-                        
-            # Apply burn
-            current_state = sol.y.T[-1].copy()
-            current_state[2:4] += burn.delta_v / velocity_normalization # Add delta-v to velocity
-            current_time_index = burn.time_index
+                all_trajectories.append(np.transpose(sol.y))
+                all_times.append(sol.t)
+                            
+                # Apply burn
+                current_state = sol.y.T[-1].copy()
+                current_state[2:4] += burn.delta_v / velocity_normalization # Add delta-v to velocity
+                current_time_index = burn.time_index
 
-            # Update the location of the burn
-            burn.set_coordinates(current_state[:2] * length_normalization)
+                # Update the location of the burn
+                burn.set_coordinates(current_state[:2] * length_normalization)
         
         # Simulate final segment
         t_span = (self.t_eval[current_time_index] / time_normalization_factor, self.t_eval[-1] / time_normalization_factor)
@@ -280,16 +277,20 @@ class Problem:
         # We need to find the point in the trajectory where the velocity is tangential to the moon
         # We know that is they are tangential, then the dot product of the velocity and the displacement vector is 0
         moon = self.objects[1]
+        closest_approach_index = np.argmin(np.linalg.norm(self.trajectory[:, :2] - moon.position, axis=1))
         moon_x_displacement = self.trajectory[:, 0] - moon.position[0]
         moon_y_displacement = self.trajectory[:, 1] - moon.position[1]
         moon_orbit_velocity = self.trajectory[:, 2:4]
+        search_radius = 200
+
         
         # Find the point in the trajectory where the velocity is tangential to the moon
         tangent_point = None
-        for i in range(len(moon_x_displacement)):
+        for i in range(-search_radius + closest_approach_index, search_radius + closest_approach_index):
             unit_velocity = moon_orbit_velocity[i] / np.linalg.norm(moon_orbit_velocity[i])
             displacement = np.array([moon_x_displacement[i], moon_y_displacement[i]])
-            if abs(np.dot(unit_velocity, displacement)) < 1e-6:
+            unit_displacement = displacement / np.linalg.norm(displacement)
+            if abs(np.dot(unit_velocity, unit_displacement)) < 1e-4:
                 tangent_point = self.trajectory[i]
                 break
         if tangent_point is None:
@@ -297,8 +298,8 @@ class Problem:
         
         # Calculate the delta_v required for a circular orbit around the moon
         moon_orbit_radius = np.linalg.norm(tangent_point[:2] - moon.position)
-        moon_orbit_velocity = np.sqrt(moon.mu / moon_orbit_radius)
-        delta_v_required = moon_orbit_velocity - np.linalg.norm(tangent_point[2:4])
+        moon_orbit_speed = np.sqrt(moon.mu / moon_orbit_radius)
+        delta_v_required = moon_orbit_speed - np.linalg.norm(tangent_point[2:4])
         return tangent_point, delta_v_required
     
     
