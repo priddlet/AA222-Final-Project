@@ -149,7 +149,7 @@ class Problem:
         t_eval = self.t_eval[current_time_index:] / time_normalization_factor
 
         sol = solve_ivp(self.cr3bp_dynamics, t_span, current_state,
-                        t_eval=t_eval, method='RK45', rtol=rtol_sim, atol=atol_sim)
+                        t_eval=t_eval, method='RK45', rtol=rtol, atol=atol)
 
         if not sol.success:
             raise RuntimeError(f"Final trajectory integration failed: {sol.message}")
