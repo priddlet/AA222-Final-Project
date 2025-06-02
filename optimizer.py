@@ -148,7 +148,7 @@ class CrossEntropyOptimizer:
                     if valid:
                         scores.append(score)
                         valid_samples.append(sample)
-                        print(f"  ✓ Valid trajectory with score {score:.4f}")
+                        print(f"Valid trajectory with score {score:.4f}")
                 except:
                     continue
 
@@ -183,7 +183,7 @@ class CrossEntropyOptimizer:
             if res_nm.success and res_nm.fun < self.best:
                 self.best = res_nm.fun
                 self.x0 = res_nm.x
-                print(f"✓ Nelder-Mead improved score to {self.best:.4f}")
+                print(f"Nelder-Mead improved score to {self.best:.4f}")
                 
                 # Second stage: BFGS (faster but needs good initial guess)
                 print("Stage 2: BFGS refinement...")
@@ -194,8 +194,8 @@ class CrossEntropyOptimizer:
                 if res_bfgs.success and res_bfgs.fun < self.best:
                     self.best = res_bfgs.fun
                     self.x0 = res_bfgs.x
-                    print(f"✓ BFGS further improved score to {self.best:.4f}")
+                    print(f"BFGS further improved score to {self.best:.4f}")
             else:
-                print("✗ Local refinement did not improve the score")
+                print("Local refinement did not improve the score")
 
         return self.x0
