@@ -213,124 +213,95 @@ class Problem:
         Args:
             verbose (bool): Whether to print verbose output
         """
-
-        # Evaluate the constraints
-
-        # The first constraint is the free return trajectory
-        # We'll give it an inital valid trajectory so we only have to worry about optimizing ours
-
-        # Make sure that we complete one orbit around the moon
-        # This will control the sign of our constraint variable
-        # First find the closest approach to the moon
         moon = self.objects[1]
-        moon_x_displacement = self.trajectory[:, 0] - moon.position[0]
-        moon_y_displacement = self.trajectory[:, 1] - moon.position[1]
-        completed_moon_orbit = False
-        free_return_trajectory = False
-        finish_time = np.inf
-        first_cross_distance = np.inf
-        second_cross_distance = np.inf
+        earth = self.objects[0]
 
-        # Check if the trajectory crosses the moon's y-axis twice
+        # Calculate all displacements at once
+        moon_displacement = self.trajectory[:, :2] - moon.position
+        earth_displacement = self.trajectory[:, :2] - earth.position
         
-        first_cross_index = None 
-        second_cross_index = None
+        # Calculate distances to moon and earth
+        moon_distances = np.linalg.norm(moon_displacement, axis=1)
+        earth_distances = np.linalg.norm(earth_displacement, axis=1)
 
-        # Displacements from Moon's position
-        moon_x_displacement = self.trajectory[:, 0] - moon.position[0]
-        moon_y_displacement = self.trajectory[:, 1] - moon.position[1]
-
-        # Look for two sign changes in x-displacement (crossing Moon’s vertical axis)
-        sign_x = np.sign(moon_x_displacement)
-
-        for i in range(1, len(sign_x)):
-            if sign_x[i] != sign_x[i - 1] and sign_x[i] != 0 and sign_x[i - 1] != 0:
-                if first_cross_index is None:
-                    first_cross_index = i
-                else:
-                    second_cross_index = i
-                    break
-
-        # Confirm the orbit crossed to the other side of the Moon (in y-direction at those points)
-        if first_cross_index is not None and second_cross_index is not None:
-            first_y = moon_y_displacement[first_cross_index]
-            second_y = moon_y_displacement[second_cross_index]
-
-            # Opposite sides of Moon in y-direction
+        # Find closest approach to moon
+        closest_approach_index = np.argmin(moon_distances)
+        
+        # Check for moon orbit completion using vectorized operations
+        sign_x = np.sign(moon_displacement[:, 0])
+        sign_y = np.sign(moon_displacement[:, 1])
+        
+        # Find crossings of moon's vertical axis
+        x_crossings = np.where(np.diff(sign_x) != 0)[0]
+        if len(x_crossings) >= 2:
+            first_cross_index = x_crossings[0]
+            second_cross_index = x_crossings[1]
+            
+            # Check if orbit crossed to other side in y-direction
+            first_y = moon_displacement[first_cross_index, 1]
+            second_y = moon_displacement[second_cross_index, 1]
             completed_moon_orbit = np.sign(first_y) != np.sign(second_y)
+            
             if completed_moon_orbit:
-                first_cross_distance = np.linalg.norm(self.trajectory[first_cross_index][:2] - moon.position)
-                second_cross_distance = np.linalg.norm(self.trajectory[second_cross_index][:2] - moon.position)
-        else:
-            completed_moon_orbit = False
-
-        # If we completed the moon orbit, we need to check that we can make it back to earth
-        if completed_moon_orbit:
-            earth = self.objects[0]
-
-            # Displacement from Earth
-            earth_x_displacement_full = self.trajectory[:, 0] - earth.position[0]
-            earth_y_displacement_full = self.trajectory[:, 1] - earth.position[1]
-
-            # Slice post-Moon crossing
-            earth_x_displacement = earth_x_displacement_full[second_cross_index:]
-            earth_y_displacement = earth_y_displacement_full[second_cross_index:]
-
-            # Detect x-axis crossings after Moon loop
-            sign_y = np.sign(earth_y_displacement)
-
-            earth_first_cross_index = None
-            earth_second_cross_index = None
-
-            for i in range(1, len(sign_y)):
-                if sign_y[i] != sign_y[i - 1] and sign_y[i] != 0 and sign_y[i - 1] != 0:
-                    if earth_first_cross_index is None:
-                        earth_first_cross_index = i
+                first_cross_distance = moon_distances[first_cross_index]
+                second_cross_distance = moon_distances[second_cross_index]
+                
+                # Check for free return trajectory
+                earth_x_post_moon = earth_displacement[second_cross_index:, 0]
+                earth_y_post_moon = earth_displacement[second_cross_index:, 1]
+                
+                # Find Earth crossings after moon loop
+                y_crossings = np.where(np.diff(np.sign(earth_y_post_moon)) != 0)[0]
+                if len(y_crossings) >= 2:
+                    earth_first_cross = y_crossings[0]
+                    earth_second_cross = y_crossings[1]
+                    
+                    x1 = earth_x_post_moon[earth_first_cross]
+                    x2 = earth_x_post_moon[earth_second_cross]
+                    free_return_trajectory = np.sign(x1) != np.sign(x2)
+                    
+                    if free_return_trajectory:
+                        finish_time = self.t_eval[second_cross_index + earth_second_cross]
                     else:
-                        earth_second_cross_index = i
-                        break
-
-            # Check that both Earth crossings are on the same side in x-direction
-            if earth_first_cross_index is not None and earth_second_cross_index is not None:
-                x1 = earth_x_displacement[earth_first_cross_index]
-                x2 = earth_x_displacement[earth_second_cross_index]
-
-                # Check that the trajectory crosses the x axis in the opposite direction
-                free_return_trajectory = np.sign(x1) != np.sign(x2)
+                        finish_time = np.inf
+                else:
+                    free_return_trajectory = False
+                    finish_time = np.inf
             else:
                 free_return_trajectory = False
+                finish_time = np.inf
+                first_cross_distance = np.inf
+                second_cross_distance = np.inf
         else:
+            completed_moon_orbit = False
             free_return_trajectory = False
-    # Time constraint for completing the whole trajectory should also be captured by these constraints
+            finish_time = np.inf
+            first_cross_distance = np.inf
+            second_cross_distance = np.inf
 
-        # Then we want our metric to be the combined error from our target min distance constraints
+        # Calculate constraints
         constraints = self.planetary_orbit_constraint()
 
-        # Then we'll create a penalty function that will penalize the constraints
-
-        #Fixed constraint penalties
+        # Calculate penalty
         penalty = 0
+        
+        # Fixed constraint penalties
         if not completed_moon_orbit:
             penalty += 1e6
         if not free_return_trajectory:
             penalty += 1e6
 
-        #Variable constraint penalties
-        dist_penalty = 1
-        penalty += dist_penalty * np.sum(constraints)
-
-        # And then we'll add the total delta-v which is our objective function
-        delta_v_penalty = 100
+        # Variable constraint penalties
+        penalty += np.sum(constraints)  # dist_penalty = 1
+        
+        # Delta-v penalty
         loc, moon_orbit_delta_v = self.find_moon_orbit_delta_v()
-        penalty += delta_v_penalty * (self.total_delta_v_constraint() + moon_orbit_delta_v)
+        penalty += 100 * (self.total_delta_v_constraint() + moon_orbit_delta_v)
         penalty += first_cross_distance + second_cross_distance
 
-        # Add the time penalty
+        # Time penalty
         if free_return_trajectory:
-            # Get the time it takes to complete the orbit around the earth
-            finish_time = self.t_eval[earth_second_cross_index]
-            time_penalty = 1
-            penalty += time_penalty * finish_time
+            penalty += finish_time
         else:
             penalty += 1e6
         
@@ -345,6 +316,7 @@ class Problem:
             print("Distance from moon protected zone:", constraints[1])
             print("Total Delta-v used:", self.total_delta_v_constraint())
             print("Penalty:", penalty)
+            
         return penalty, valid_trajectory
     
     def find_moon_orbit_delta_v(self):

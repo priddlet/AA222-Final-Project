@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 #from optimizer import CrossEntropyOptimizer
 from hybrid import HybridOptimizer
 from optimizer import CrossEntropyOptimizer
+from plots import plot_results
 
 # Normalized gravitational constant
 G = 1
@@ -226,10 +227,11 @@ def apollo_11_mission(earth, moon):
     apollo_11 = Problem(initial_conditions, [earth, moon], mission_duration, num_steps_per_timestep, "lunar_insertion")
 
     # 1. TLI (Trans-Lunar Injection) burn
-    tli_delta_v = 3.15011329# km/s
-    tli_time = 1.98527651
+    tli_delta_v = 3.15#3.15011329# km/s
+    tli_time = 2#1.98527651
     apollo_11.add_burn_to_trajectory(tli_delta_v, tli_time, rtol, atol)
     apollo_11.simulate_trajectory(rtol, atol)
+    unoptimized_burn1 = (tli_time, tli_delta_v)
 
     # Evaluate constraints and print them
     print("\nInitial trajectory:")
@@ -248,10 +250,11 @@ def apollo_11_mission(earth, moon):
     max_delta_v = 10
 
     # Run the hybrid optimization
-    optimizer = HybridOptimizer(apollo_11, use_gradient_refinement=True, stage1_method="pso", initial_conditions=x0)
-    best_control = optimizer.optimize()
-    #optimizer = CrossEntropyOptimizer(apollo_11, x0, min_time_step, max_time_step, min_delta_v, max_delta_v, rtol, atol)
-    #best_control = optimizer.optimize(num_samples=50, n_best=3, iterations=3, time_variance=.5, delta_v_variance=1e-2, decay_rate=0.5)
+    #optimizer = HybridOptimizer(apollo_11, use_gradient_refinement=True, stage1_method="pso", initial_conditions=x0)
+    #best_control = optimizer.optimize()
+    optimizer = CrossEntropyOptimizer(apollo_11, x0, min_time_step, max_time_step, min_delta_v, max_delta_v, rtol, atol)
+    best_control = optimizer.optimize(num_samples=50, n_best=3, iterations=3, time_variance=1e-2, delta_v_variance=1e-3, decay_rate=0.5)
+    optimized_burn1 = best_control
 
     # Add the optimized burn to the trajectory
     apollo_11.clear_control_sequence()
@@ -274,6 +277,8 @@ def apollo_11_mission(earth, moon):
         -start_velocity[0],
         -start_velocity[1]
     ])
+
+    start_point = np.array([tangent_point[0], tangent_point[1]])
 
     # Define a Problem object for the second part of the mission
     mission_pt2_duration = 1000 # TODO: Change this as needed
@@ -303,11 +308,12 @@ def apollo_11_mission(earth, moon):
     apollo_11_pt2.simulate_trajectory(rtol, atol)
     initial_trajectory_pt2 = apollo_11_pt2.trajectory
     initial_control_pt2 = apollo_11_pt2.control_sequence
+    unoptimized_burn2 = (perigee_time, delta_v)
     # Print the inital objective function and constraints
     print("\nInitial trajectory:")
     penalty, earth_return_trajectory = apollo_11_pt2.evaluate(True)
 
-    plot_combined_trajectory([(initial_trajectory_pt2, initial_control_pt2, apollo_11_pt2)])
+    #plot_combined_trajectory([(initial_trajectory_pt2, initial_control_pt2, apollo_11_pt2)])
 
     
     print("\nInitial objective function:", penalty)
@@ -318,10 +324,12 @@ def apollo_11_mission(earth, moon):
 
 
     # Run the hybrid optimization
-    optimizer = HybridOptimizer(apollo_11_pt2, use_gradient_refinement=True, stage1_method="pso", initial_conditions=x0)
-    best_control = optimizer.optimize()
-    #optimizer = CrossEntropyOptimizer(apollo_11_pt2, x0, min_time_step, max_time_step, min_delta_v, max_delta_v, rtol, atol)
-    #best_control = optimizer.optimize(num_samples=50, n_best=3, iterations=3, time_variance=1, delta_v_variance=1e-3, decay_rate=0.5)
+    #optimizer = HybridOptimizer(apollo_11_pt2, use_gradient_refinement=True, stage1_method="pso", initial_conditions=x0)
+    #best_control = optimizer.optimize()
+    optimizer = CrossEntropyOptimizer(apollo_11_pt2, x0, min_time_step, max_time_step, min_delta_v, max_delta_v, rtol, atol)
+    best_control = optimizer.optimize(num_samples=50, n_best=3, iterations=3, time_variance=.5, delta_v_variance=1e-3, decay_rate=0.5)
+    optimized_burn2 = best_control
+    
 
     # Add the optimized burn to the trajectory
     apollo_11_pt2.clear_control_sequence()
@@ -329,6 +337,8 @@ def apollo_11_mission(earth, moon):
     apollo_11_pt2.simulate_trajectory(rtol, atol)
     print("\nOptimized trajectory:")
     constraints, valid_trajectory = apollo_11_pt2.evaluate(True)
+
+    plot_results(apollo_11, apollo_11_pt2, unoptimized_burn1, optimized_burn1, unoptimized_burn2, optimized_burn2, start_point)
 
     #plot_combined_trajectory([(apollo_11_pt2.trajectory, apollo_11_pt2.control_sequence, apollo_11_pt2)])
 
