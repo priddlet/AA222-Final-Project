@@ -183,17 +183,18 @@ class Problem:
         finish_time = np.inf
 
         # Check if the trajectory crosses the moon's x-axis twice
+        
         first_cross_index = None
         second_cross_index = None
-        last_sign = moon_x_displacement[0] > 0
-        for i in range(len(moon_x_displacement)):
-            if moon_x_displacement[i] > 0 != last_sign:
+
+        sign_x = np.sign(moon_x_displacement)
+        for i in range(1, len(sign_x)):
+            if sign_x[i] != sign_x[i - 1] and sign_x[i] != 0:
                 if first_cross_index is None:
                     first_cross_index = i
                 else:
                     second_cross_index = i
                     break
-            last_sign = moon_x_displacement[i] > 0
         
         # Check if at those two points the y displacement is on opposite sides of the moon
         if first_cross_index is not None and second_cross_index is not None:
@@ -205,27 +206,36 @@ class Problem:
         # Then, if we did make it around the moon, check if we complete an orbit around the earth afterwards
         if completed_moon_orbit:
             earth = self.objects[0]
+            
+            # Displacement relative to Earth
             earth_x_displacement = self.trajectory[:, 0] - earth.position[0]
             earth_y_displacement = self.trajectory[:, 1] - earth.position[1]
+
+            # Slice from the point after the moon orbit
             earth_x_displacement = earth_x_displacement[second_cross_index:]
             earth_y_displacement = earth_y_displacement[second_cross_index:]
-            last_sign = earth_x_displacement[0] > 0
+
+            # Compute sign array
+            sign_x = np.sign(earth_x_displacement)
+
             earth_first_cross_index = None
             earth_second_cross_index = None
-            for i in range(second_cross_index, len(earth_x_displacement)):
-                if earth_x_displacement[i] > 0 != last_sign:
+
+            for i in range(1, len(sign_x)):
+                if sign_x[i] != sign_x[i - 1] and sign_x[i] != 0:
                     if earth_first_cross_index is None:
                         earth_first_cross_index = i
                     else:
                         earth_second_cross_index = i
                         break
-                last_sign = earth_x_displacement[i] > 0
-            
+
+            # Proceed only if both crossings are found
             if earth_first_cross_index is not None and earth_second_cross_index is not None:
-                earth_first_cross_y = earth_y_displacement[earth_first_cross_index]
-                earth_second_cross_y = earth_y_displacement[earth_second_cross_index]
-                free_return_trajectory = ((earth_first_cross_y > 0 and earth_second_cross_y > 0)
-                                           or (earth_first_cross_y < 0 and earth_second_cross_y < 0))
+                y1 = earth_y_displacement[earth_first_cross_index]
+                y2 = earth_y_displacement[earth_second_cross_index]
+
+                # Confirm both y-values have the same sign (same side of Earth)
+                free_return_trajectory = (y1 * y2 > 0)
 
         # Time constraint for completing the whole trajectory should also be captured by these constraints
 
@@ -358,21 +368,22 @@ class Problem:
         Args:
             verbose (bool): Whether to print verbose output
         """
-        # Make sure we cross over the earth's x-axis twice
+        # Make sure we cross over the earth's y axis twice and then swich signs across the x axis
         earth = self.objects[0]
         earth_x_displacement = self.trajectory[:, 0] - earth.position[0]
         earth_y_displacement = self.trajectory[:, 1] - earth.position[1]
         earth_first_cross_index = None
         earth_second_cross_index = None
-        last_sign = earth_x_displacement[0] > 0
-        for i in range(len(earth_x_displacement)):
-            if earth_x_displacement[i] > 0 != last_sign:
+        earth_return_trajectory = False
+
+        sign_x = np.sign(earth_x_displacement)
+        for i in range(1, len(sign_x)):
+            if sign_x[i] != sign_x[i - 1] and sign_x[i] != 0:
                 if earth_first_cross_index is None:
                     earth_first_cross_index = i
                 else:
                     earth_second_cross_index = i
                     break
-            last_sign = earth_x_displacement[i] > 0
         
         if earth_first_cross_index is not None and earth_second_cross_index is not None:
             earth_first_cross_y = earth_y_displacement[earth_first_cross_index]
@@ -390,7 +401,8 @@ class Problem:
 
         # Then at that point we'll evaluate our end conditions
         r_error, delta_v_error = self.terminal_error(self.trajectory[leo_index])
-        
+        reentry_angle_error = self.reentry_angle_error(self.trajectory[leo_index])
+
         # We also want to know the time it takes to complete the trajectory
         finish_time = self.t_eval[leo_index]
 
@@ -402,6 +414,8 @@ class Problem:
 
         # Then we have our variable constraint penalties
         penalty += 50 * r_error
+
+        # TODO: Add reentry angle penalty if it isn't too complicated
 
         # Then we'll add the total delta-v which is our objective function and the time penalty
         time_penalty = 1

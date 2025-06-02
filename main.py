@@ -194,6 +194,8 @@ def apollo_11_mission(earth, moon):
     num_steps_per_timestep = 20
     rtol = 1e-7
     atol = 1e-9
+    length_of_timestep = 383.0 / num_steps_per_timestep
+    print(f"Length of timestep: {length_of_timestep} seconds")
 
     # Initial conditions for free return trajectory
     # Starting from low Earth orbit
@@ -215,7 +217,6 @@ def apollo_11_mission(earth, moon):
 
     apollo_11 = Problem(initial_conditions, [earth, moon], mission_duration, num_steps_per_timestep)
 
-    # Define the three burns for the free return trajectory
     # 1. TLI (Trans-Lunar Injection) burn
     tli_delta_v = 3.152# km/s
     tli_time = 2.0
@@ -230,7 +231,7 @@ def apollo_11_mission(earth, moon):
     initial_control = apollo_11.control_sequence
 
     # Now we're going to optimize the first part of the trajectory
-    #plot_combined_trajectory([(initial_trajectory, initial_control, apollo_11)])
+    plot_combined_trajectory([(initial_trajectory, initial_control, apollo_11)])
 
     """# Define the optimizer parameters
     x0 = np.array([tli_time, tli_delta_v])
@@ -252,12 +253,14 @@ def apollo_11_mission(earth, moon):
     best_control = optimizer.optimize(num_samples, n_best, iterations, time_variance, delta_v_variance, decay_rate)
     best_control = np.array([4.99943793, 1.54261006])
 
-    # Add the burn to the trajectory
+    # Add the optimizedburn to the trajectory
     apollo_11.clear_control_sequence()
     apollo_11.add_burn_to_trajectory(best_control[1], best_control[0], rtol, atol)
     #apollo_11.simulate_trajectory(rtol, atol)
     print("\nOptimized trajectory:")
     constraints, valid_trajectory = apollo_11.lunar_insertion_evaluate(True)"""
+
+    # TODO: Optimize the trajectory for pt1
 
 
     # 2. Transition to a circular moon orbit
@@ -274,7 +277,7 @@ def apollo_11_mission(earth, moon):
     ])
 
     # Define a Problem object for the second part of the mission
-    mission_pt2_duration = 1000
+    mission_pt2_duration = 1000 # TODO: Change this as needed
     num_steps_per_timestep_pt2 = 20
     apollo_11_pt2 = Problem(x0, [earth, moon], mission_pt2_duration, num_steps_per_timestep_pt2)
     
@@ -289,6 +292,7 @@ def apollo_11_mission(earth, moon):
     # But I'm gonna use keplers third law just to be a badass!
     moon_orbit_time = 2 * np.pi * r_moon**1.5 / np.sqrt(moon.G * moon.mass)
 
+    # TODO: Find good initial conditions for the return burn AFTER optimizing the first part of the trajectory
     return_burn_time = 2.0
     return_burn_delta_v = 1.0
     
@@ -302,7 +306,7 @@ def apollo_11_mission(earth, moon):
 
     # Print the inital objective function and constraints
     penalty, earth_return_trajectory = apollo_11_pt2.earth_return_evaluate(True)
-    print("Initial objective function:", penalty)
+    print("\nInitial objective function:", penalty)
     print("Initial constraints:", earth_return_trajectory)
 
     # Define the optimizer parameters
@@ -318,24 +322,9 @@ def apollo_11_mission(earth, moon):
     delta_v_variance = 1e-5
     decay_rate = 0.5
 
-    """# Run the optimization
-    optimizer = CrossEntropyOptimizer(apollo_11_pt2, x0, min_time_step, max_time_step, min_delta_v, max_delta_v, rtol, atol)
-    best_control = optimizer.optimize(num_samples, n_best, iterations, time_variance, delta_v_variance, decay_rate)
+    # TODO: Optimize the trajectory for pt2
 
-    # Add the burn to the trajectory
-    apollo_11_pt2.clear_control_sequence()
-    apollo_11_pt2.add_burn_to_trajectory(best_control[1], best_control[0], rtol, atol)
-    apollo_11_pt2.simulate_trajectory(rtol, atol)
-    print("\nOptimized trajectory:")
-    penalty, earth_return_trajectory = apollo_11_pt2.earth_return_evaluate(True)
-    print("Optimized objective function:", penalty)
-    print("Optimized constraints:", earth_return_trajectory)"""
-
-    """"# Get the final trajectory and plot it
-    plot_combined_trajectory([(initial_trajectory, initial_control, apollo_11), 
-                              (apollo_11.trajectory, apollo_11.control_sequence, apollo_11),
-                              (apollo_11_pt2.trajectory, apollo_11_pt2.control_sequence, apollo_11_pt2)])"""
-    #plot_combined_trajectory([(initial_trajectory_pt2, initial_control_pt2, apollo_11_pt2)])
+    # TODO: Plot the entire trajectory
 
 def main():
     """Main function to run the simulation."""
